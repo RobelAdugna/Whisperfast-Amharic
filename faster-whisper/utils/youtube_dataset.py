@@ -96,15 +96,17 @@ class YouTubeDatasetPreparator:
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
-            # Bot bypass strategies
+            # Bot bypass strategies - use multiple clients for maximum compatibility
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],
-                    'player_skip': ['webpage', 'configs'],
+                    'player_client': ['ios', 'android', 'mweb'],  # iOS is most reliable
+                    'player_skip': ['webpage', 'js', 'configs'],  # Skip all detection points
+                    'skip': ['dash', 'hls'],  # Prefer direct formats
                 }
             },
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',  # iOS YouTube app
+                'Accept-Language': 'en-US,en;q=0.9',
             },
         }
         
@@ -187,19 +189,18 @@ class YouTubeDatasetPreparator:
             'subtitleslangs': ['am'],
             'subtitlesformat': 'srt',
             'quiet': False,
-            # Bot bypass strategies
+            # Bot bypass strategies - iOS client is most reliable
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],  # Use mobile and web clients
-                    'player_skip': ['webpage', 'configs'],  # Skip unnecessary requests
+                    'player_client': ['ios', 'android', 'mweb'],  # iOS first, then Android, mobile web
+                    'player_skip': ['webpage', 'js', 'configs'],  # Skip all detection points
+                    'skip': ['dash', 'hls'],  # Prefer direct formats
                 }
             },
-            # Additional headers to mimic browser
+            # iOS YouTube app headers - most reliable
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Sec-Fetch-Mode': 'navigate',
+                'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                'Accept-Language': 'en-US,en;q=0.9',
             },
         }
         
