@@ -1,0 +1,13 @@
+{
+  "description": "Template configuration for this project. See https://www.codebuff.com/config for all options.",
+  "startupProcesses": [
+    {
+      "name": "jupyter",
+      "command": "jupyter notebook",
+      "enabled": false,
+      "stdoutFile": "logs/jupyter.log",
+      "cwd": "faster-whisper"
+    }
+  ],
+  "fileChangeHooks": []
+}

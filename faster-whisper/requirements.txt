@@ -1,0 +1,43 @@
+# Core ML Libraries
+torch>=2.1.0,<2.3.0
+torchaudio>=2.1.0,<2.3.0
+torchvision>=0.16.0,<0.18.0
+transformers>=4.35.0
+datasets>=2.14.0
+evaluate>=0.4.0
+jiwer>=3.0.0
+
+# Lightning AI
+lightning>=2.1.0
+torchmetrics>=1.2.0,<1.3.0
+
+# Efficient Training
+deepspeed>=0.11.0
+peft>=0.6.0
+bitsandbytes>=0.41.0
+
+# Audio Processing
+librosa>=0.10.0
+soundfile>=0.12.0
+ctranslate2>=3.20.0
+faster-whisper>=0.9.0
+
+# Gradio UI
+gradio>=4.0.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Logging and Monitoring
+wandb>=0.15.0
+tensorboard>=2.14.0
+
+# Utilities
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Optional: For Amharic text processing
+unicodedataplus>=0.0.1

@@ -1,0 +1,82 @@
+# Amharic Whisper Fine-tuning Configuration
+
+# Model settings
+model:
+  base_model: "openai/whisper-large-v3"  # or medium/small for faster training
+  language: "am"  # Amharic ISO code
+  task: "transcribe"
+  
+# Dataset settings
+data:
+  input_format: "ljspeech"  # Your TTS dataset format
+  train_dir: "./data/amharic_whisper/train"
+  val_dir: "./data/amharic_whisper/val"
+  test_dir: "./data/amharic_whisper/test"
+  audio_max_length: 30.0  # seconds
+  sample_rate: 16000
+  train_split: 0.9
+  val_split: 0.05
+  test_split: 0.05
+  
+# Training settings
+training:
+  output_dir: "./models/whisper-amharic-finetuned"
+  num_epochs: 5
+  batch_size: 8  # Adjust based on GPU memory
+  gradient_accumulation_steps: 2
+  learning_rate: 1e-5
+  warmup_steps: 500
+  weight_decay: 0.01
+  fp16: true  # Mixed precision training
+  gradient_checkpointing: true
+  
+# LoRA settings (for efficient fine-tuning)
+lora:
+  enabled: true
+  r: 16  # LoRA rank
+  lora_alpha: 32
+  lora_dropout: 0.1
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "k_proj"
+    - "out_proj"
+  
+# Optimization
+optimization:
+  optimizer: "adamw"
+  scheduler: "linear"
+  max_grad_norm: 1.0
+  
+# Evaluation
+evaluation:
+  eval_steps: 500
+  save_steps: 1000
+  logging_steps: 100
+  metric: "wer"  # Word Error Rate
+  
+# Lightning AI settings
+lightning:
+  enabled: true
+  compute: "gpu-fast-multi"  # Options: gpu-fast, gpu-fast-multi
+  num_nodes: 1
+  num_gpus: 1  # or 2, 4, 8 for multi-GPU
+  strategy: "ddp"  # Distributed Data Parallel
+  precision: "16-mixed"
+  
+# Checkpointing
+checkpoint:
+  save_total_limit: 3
+  resume_from_checkpoint: null
+  
+# Monitoring
+monitoring:
+  use_wandb: false  # Set to true if using Weights & Biases
+  project_name: "whisper-amharic"
+  
+# Amharic-specific preprocessing
+amharic:
+  normalize_text: true
+  remove_punctuation: false  # Keep for better context
+  convert_numbers_to_words: true
+  handle_geez_script: true
