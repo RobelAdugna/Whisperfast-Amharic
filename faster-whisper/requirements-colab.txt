@@ -5,9 +5,9 @@
 # =============================================================================
 # Core ML Libraries (Compatible with Colab's CUDA 12.2)
 # =============================================================================
-torch==2.1.0
-torchaudio==2.1.0
-torchvision==0.16.0
+torch>=2.2.0
+torchaudio>=2.2.0
+torchvision>=0.17.0
 
 # Hugging Face ecosystem
 transformers==4.35.2
