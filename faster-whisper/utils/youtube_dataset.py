@@ -31,6 +31,11 @@ try:
 except ImportError:
     librosa = None
 
+try:
+    from .amharic_processing import AmharicTextProcessor
+except ImportError:
+    AmharicTextProcessor = None
+
 
 class YouTubeDatasetPreparator:
     """Prepare high-quality Whisper datasets from YouTube videos with Amharic subtitles"""
@@ -78,6 +83,9 @@ class YouTubeDatasetPreparator:
         
         self.segments_dir = self.output_dir / "segments"
         self.segments_dir.mkdir(exist_ok=True)
+        
+        # Initialize Amharic processor if available
+        self.amharic_processor = AmharicTextProcessor() if AmharicTextProcessor else None
     
     def check_youtube_link(self, url: str) -> Dict:
         """
@@ -355,39 +363,156 @@ class YouTubeDatasetPreparator:
         amharic_pattern = re.compile(r'[\u1200-\u137F]')
         return bool(amharic_pattern.search(text))
     
+    def _calculate_quality_score(self, text: str, duration: float, audio_segment: np.ndarray = None, sr: int = 16000) -> Dict:
+        """
+        Calculate quality score for a dataset segment (Amharic-specific)
+        
+        Args:
+            text: Transcript text
+            duration: Audio duration in seconds
+            audio_segment: Audio samples (optional, for audio quality checks)
+            sr: Sample rate
+            
+        Returns:
+            Dictionary with quality metrics and overall score
+        """
+        scores = {}
+        
+        # 1. Amharic purity check
+        if self.amharic_processor:
+            lang_scores = self.amharic_processor.detect_language(text)
+            amharic_ratio = lang_scores.get('amharic', 0)
+            scores['amharic_purity'] = amharic_ratio
+        else:
+            # Fallback: simple character count
+            amharic_pattern = re.compile(r'[\u1200-\u137F\u1380-\u139F\u2D80-\u2DDF]')
+            amharic_chars = len(amharic_pattern.findall(text))
+            total_chars = len([c for c in text if c.strip()])
+            scores['amharic_purity'] = amharic_chars / total_chars if total_chars > 0 else 0
+        
+        # 2. Text/Audio ratio check (characters per second)
+        char_count = len(text.strip())
+        chars_per_second = char_count / duration if duration > 0 else 0
+        # Typical Amharic speech: 8-15 characters per second
+        # Score: 1.0 if in range [8, 15], decay outside
+        if 8 <= chars_per_second <= 15:
+            scores['text_audio_ratio'] = 1.0
+        elif chars_per_second < 8:
+            scores['text_audio_ratio'] = max(0, chars_per_second / 8)
+        else:
+            scores['text_audio_ratio'] = max(0, 1.0 - (chars_per_second - 15) / 20)
+        
+        # 3. Text length check
+        if char_count < 10:
+            scores['text_length'] = 0.3  # Too short
+        elif char_count > 200:
+            scores['text_length'] = 0.8  # Very long
+        else:
+            scores['text_length'] = 1.0  # Good length
+        
+        # 4. Punctuation presence (indicates proper transcription)
+        has_punctuation = bool(re.search(r'[።፣፤፥፧,.!?;:]', text))
+        scores['has_punctuation'] = 1.0 if has_punctuation else 0.7
+        
+        # 5. Audio quality check (if audio provided)
+        if audio_segment is not None and len(audio_segment) > 0:
+            # Silence ratio
+            silence_threshold = 0.01  # Amplitude threshold
+            silence_ratio = np.sum(np.abs(audio_segment) < silence_threshold) / len(audio_segment)
+            scores['silence_ratio'] = max(0, 1.0 - silence_ratio)  # Less silence = better
+            
+            # Signal-to-noise ratio estimate (simple version)
+            signal_power = np.mean(audio_segment ** 2)
+            if signal_power > 0:
+                # Estimate noise as quietest 10% of frames
+                sorted_power = np.sort(audio_segment ** 2)
+                noise_power = np.mean(sorted_power[:len(sorted_power)//10])
+                snr = 10 * np.log10(signal_power / (noise_power + 1e-10))
+                # SNR > 20dB is good, < 10dB is bad
+                scores['audio_quality'] = min(1.0, max(0, (snr - 10) / 20))
+            else:
+                scores['audio_quality'] = 0.0
+        else:
+            scores['silence_ratio'] = 1.0  # Assume OK if no audio
+            scores['audio_quality'] = 1.0
+        
+        # 6. Overall quality score (weighted average)
+        weights = {
+            'amharic_purity': 0.25,
+            'text_audio_ratio': 0.20,
+            'text_length': 0.15,
+            'has_punctuation': 0.10,
+            'silence_ratio': 0.15,
+            'audio_quality': 0.15
+        }
+        
+        overall_score = sum(scores[k] * weights[k] for k in weights.keys())
+        scores['overall_score'] = overall_score
+        
+        return scores
+    
+    def _normalize_amharic_text(self, text: str) -> str:
+        """
+        Normalize Amharic text using AmharicTextProcessor
+        
+        Args:
+            text: Raw Amharic text
+            
+        Returns:
+            Normalized text
+        """
+        if self.amharic_processor:
+            return self.amharic_processor.normalize_text(text)
+        return text.strip()
+    
     def create_dataset_segments(
         self,
         audio_path: Path,
         segments: List[Dict],
         video_id: str,
-        progress_callback: Optional[Callable] = None
-    ) -> List[Dict]:
+        progress_callback: Optional[Callable] = None,
+        quality_threshold: float = 0.6
+    ) -> Tuple[List[Dict], Dict]:
         """
-        Create individual audio segments from subtitles
+        Create individual audio segments from subtitles with Amharic quality scoring
         
         Args:
             audio_path: Path to processed audio file
             segments: List of subtitle segments
             video_id: YouTube video ID
             progress_callback: Optional callback for progress updates
+            quality_threshold: Minimum quality score (0-1) to include segment
             
         Returns:
-            List of dataset entries
+            Tuple of (dataset entries, quality statistics)
         """
         if librosa is None:
             raise ImportError("librosa is not installed. Install with: pip install librosa")
         
         if progress_callback:
-            progress_callback(0.7, "Creating dataset segments...")
+            progress_callback(0.7, "Creating dataset segments with quality scoring...")
         
         # Load full audio
         audio, sr = librosa.load(audio_path, sr=self.target_sr, mono=True)
         
         dataset_entries = []
+        quality_stats = {
+            'total_segments': 0,
+            'passed_quality': 0,
+            'failed_duration': 0,
+            'failed_quality': 0,
+            'avg_quality_score': 0,
+            'quality_distribution': {'excellent': 0, 'good': 0, 'fair': 0, 'poor': 0}
+        }
+        
+        total_quality = 0
         
         for idx, segment in enumerate(segments):
+            quality_stats['total_segments'] += 1
+            
             # Validate segment duration
             if segment['duration'] < self.min_duration or segment['duration'] > self.max_duration:
+                quality_stats['failed_duration'] += 1
                 continue
             
             # Extract audio segment
@@ -398,6 +523,36 @@ class YouTubeDatasetPreparator:
             
             # Skip if segment is too short after extraction
             if len(audio_segment) < sr * self.min_duration:
+                quality_stats['failed_duration'] += 1
+                continue
+            
+            # Normalize text
+            normalized_text = self._normalize_amharic_text(segment['text'])
+            
+            # Calculate quality score
+            quality_scores = self._calculate_quality_score(
+                normalized_text,
+                segment['duration'],
+                audio_segment,
+                sr
+            )
+            
+            overall_score = quality_scores['overall_score']
+            total_quality += overall_score
+            
+            # Classify quality
+            if overall_score >= 0.85:
+                quality_stats['quality_distribution']['excellent'] += 1
+            elif overall_score >= 0.75:
+                quality_stats['quality_distribution']['good'] += 1
+            elif overall_score >= 0.65:
+                quality_stats['quality_distribution']['fair'] += 1
+            else:
+                quality_stats['quality_distribution']['poor'] += 1
+            
+            # Filter by quality threshold
+            if overall_score < quality_threshold:
+                quality_stats['failed_quality'] += 1
                 continue
             
             # Save segment
@@ -406,22 +561,34 @@ class YouTubeDatasetPreparator:
             
             sf.write(segment_path, audio_segment, sr)
             
-            # Create dataset entry
+            # Create dataset entry with quality metrics
             dataset_entries.append({
                 'audio_path': str(segment_path.relative_to(self.output_dir)),
-                'text': segment['text'],
+                'text': normalized_text,
                 'duration': segment['duration'],
                 'start': segment['start'],
                 'end': segment['end'],
                 'video_id': video_id,
-                'segment_id': idx
+                'segment_id': idx,
+                'quality_score': round(overall_score, 3),
+                'quality_metrics': {
+                    'amharic_purity': round(quality_scores['amharic_purity'], 3),
+                    'text_audio_ratio': round(quality_scores['text_audio_ratio'], 3),
+                    'audio_quality': round(quality_scores['audio_quality'], 3)
+                }
             })
+            
+            quality_stats['passed_quality'] += 1
             
             if progress_callback and idx % 10 == 0:
                 progress = 0.7 + (idx / len(segments)) * 0.2
                 progress_callback(progress, f"Processing segment {idx + 1}/{len(segments)}")
         
-        return dataset_entries
+        # Calculate average quality
+        if quality_stats['total_segments'] > 0:
+            quality_stats['avg_quality_score'] = round(total_quality / quality_stats['total_segments'], 3)
+        
+        return dataset_entries, quality_stats
     
     def process_youtube_video(
         self,
@@ -458,8 +625,8 @@ class YouTubeDatasetPreparator:
             if not segments:
                 raise ValueError("No valid Amharic segments found in subtitles")
             
-            # Step 4: Create dataset segments
-            dataset_entries = self.create_dataset_segments(
+            # Step 4: Create dataset segments with quality scoring
+            dataset_entries, quality_stats = self.create_dataset_segments(
                 clean_audio_path,
                 segments,
                 info['video_id'],
@@ -498,7 +665,8 @@ class YouTubeDatasetPreparator:
                 'audio_path': str(final_audio_path),
                 'srt_path': str(final_srt_path),
                 'output_dir': str(self.output_dir),
-                'dataset_entries': dataset_entries
+                'dataset_entries': dataset_entries,
+                'quality_stats': quality_stats
             }
             
             return result
@@ -584,8 +752,8 @@ class YouTubeDatasetPreparator:
             if progress_callback:
                 progress_callback(0.4, f"Found {len(segments)} segments...")
             
-            # Create dataset segments
-            dataset_entries = self.create_dataset_segments(
+            # Create dataset segments with quality scoring
+            dataset_entries, quality_stats = self.create_dataset_segments(
                 audio_file,
                 segments,
                 file_id,
@@ -625,7 +793,8 @@ class YouTubeDatasetPreparator:
                 'audio_path': str(final_audio_path),
                 'srt_path': str(final_srt_path),
                 'output_dir': str(self.output_dir),
-                'dataset_entries': dataset_entries
+                'dataset_entries': dataset_entries,
+                'quality_stats': quality_stats
             }
         
         except Exception as e:
