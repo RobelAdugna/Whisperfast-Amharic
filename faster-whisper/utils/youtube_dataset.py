@@ -48,7 +48,8 @@ class YouTubeDatasetPreparator:
         min_segment_duration: float = 1.0,
         max_segment_duration: float = 25.0,
         target_sample_rate: int = 16000,
-        cookies_from_browser: Optional[str] = None
+        cookies_from_browser: Optional[str] = None,
+        append_mode: bool = True
     ):
         """
         Initialize YouTube Dataset Preparator
@@ -73,6 +74,7 @@ class YouTubeDatasetPreparator:
         self.max_duration = max_segment_duration
         self.target_sr = target_sample_rate
         self.cookies_from_browser = cookies_from_browser
+        self.append_mode = append_mode
         
         # Create subdirectories
         self.audio_dir = self.output_dir / "audio"
@@ -84,8 +86,54 @@ class YouTubeDatasetPreparator:
         self.segments_dir = self.output_dir / "segments"
         self.segments_dir.mkdir(exist_ok=True)
         
+        # Master manifest for incremental building
+        self.master_manifest_path = self.output_dir / "master_manifest.json"
+        
         # Initialize Amharic processor if available
         self.amharic_processor = AmharicTextProcessor() if AmharicTextProcessor else None
+    
+    def _load_existing_manifest(self) -> List[Dict]:
+        """Load existing master manifest if in append mode"""
+        if self.append_mode and self.master_manifest_path.exists():
+            try:
+                with open(self.master_manifest_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load existing manifest: {e}")
+                return []
+        return []
+    
+    def _save_master_manifest(self, new_entries: List[Dict]) -> Dict:
+        """Save or append to master manifest"""
+        if self.append_mode:
+            # Load existing entries
+            existing_entries = self._load_existing_manifest()
+            previous_count = len(existing_entries)
+            
+            # Append new entries
+            all_entries = existing_entries + new_entries
+            
+            # Save combined manifest
+            with open(self.master_manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(all_entries, f, ensure_ascii=False, indent=2)
+            
+            return {
+                'previous_segments': previous_count,
+                'new_segments': len(new_entries),
+                'total_segments': len(all_entries),
+                'master_manifest_path': str(self.master_manifest_path)
+            }
+        else:
+            # Fresh mode: just save new entries
+            with open(self.master_manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(new_entries, f, ensure_ascii=False, indent=2)
+            
+            return {
+                'previous_segments': 0,
+                'new_segments': len(new_entries),
+                'total_segments': len(new_entries),
+                'master_manifest_path': str(self.master_manifest_path)
+            }
     
     def check_youtube_link(self, url: str) -> Dict:
         """
@@ -636,10 +684,13 @@ class YouTubeDatasetPreparator:
             if progress_callback:
                 progress_callback(0.9, "Saving dataset manifest...")
             
-            # Step 5: Save manifest
+            # Step 5: Save individual manifest
             manifest_path = self.output_dir / f"{info['video_id']}_manifest.json"
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 json.dump(dataset_entries, f, ensure_ascii=False, indent=2)
+            
+            # Step 6: Save to master manifest (incremental)
+            master_info = self._save_master_manifest(dataset_entries)
             
             # Copy cleaned audio and subtitles to output
             final_audio_path = self.audio_dir / f"{info['video_id']}.wav"
@@ -666,7 +717,8 @@ class YouTubeDatasetPreparator:
                 'srt_path': str(final_srt_path),
                 'output_dir': str(self.output_dir),
                 'dataset_entries': dataset_entries,
-                'quality_stats': quality_stats
+                'quality_stats': quality_stats,
+                'master_manifest': master_info
             }
             
             return result
@@ -763,10 +815,13 @@ class YouTubeDatasetPreparator:
             if progress_callback:
                 progress_callback(0.9, "Saving dataset manifest...")
             
-            # Save manifest
+            # Save individual manifest
             manifest_path = self.output_dir / f"{file_id}_manifest.json"
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 json.dump(dataset_entries, f, ensure_ascii=False, indent=2)
+            
+            # Save to master manifest (incremental)
+            master_info = self._save_master_manifest(dataset_entries)
             
             # Copy files to output
             final_audio_path = self.audio_dir / f"{file_id}{audio_file.suffix}"
@@ -794,7 +849,8 @@ class YouTubeDatasetPreparator:
                 'srt_path': str(final_srt_path),
                 'output_dir': str(self.output_dir),
                 'dataset_entries': dataset_entries,
-                'quality_stats': quality_stats
+                'quality_stats': quality_stats,
+                'master_manifest': master_info
             }
         
         except Exception as e:
@@ -832,10 +888,13 @@ class YouTubeDatasetPreparator:
             if result['success']:
                 all_entries.extend(result['dataset_entries'])
         
-        # Save combined manifest
+        # Save combined manifest and master manifest
         combined_manifest_path = self.output_dir / "combined_manifest.json"
         with open(combined_manifest_path, 'w', encoding='utf-8') as f:
             json.dump(all_entries, f, ensure_ascii=False, indent=2)
+        
+        # Save to master manifest (incremental)
+        master_info = self._save_master_manifest(all_entries)
         
         successful = sum(1 for r in results if r['success'])
         failed = len(results) - successful

@@ -440,6 +440,7 @@ def process_local_file_pair(
     use_demucs: bool,
     min_duration: float,
     max_duration: float,
+    append_mode: bool,
     progress=gr.Progress()
 ):
     """Process local audio + SRT file pairs (supports multiple files)"""
@@ -487,7 +488,8 @@ def process_local_file_pair(
             output_dir=output_dir,
             use_demucs=use_demucs,
             min_segment_duration=min_duration,
-            max_segment_duration=max_duration
+            max_segment_duration=max_duration,
+            append_mode=append_mode
         )
         
         # Process single or multiple pairs
@@ -502,24 +504,27 @@ def process_local_file_pair(
             if not result['success']:
                 return f"❌ Processing failed: {result['error']}", None, ""
             
-            # Create summary
+            # Create summary with master manifest info
+            master_info = result.get('master_manifest', {})
             summary = f"""✅ Local Files Dataset Created Successfully!
 
 📁 **Files**: {result['audio_filename']} + {result['srt_filename']}
 🆔 **ID**: {result['file_id']}
-📊 **Total Segments**: {result['total_segments']}
-⏱️  **Total Duration**: {result['total_duration_minutes']:.1f} minutes ({result['total_duration_seconds']:.1f} seconds)
+📊 **New Segments**: {result['total_segments']}
+⏱️  **Duration**: {result['total_duration_minutes']:.1f} minutes
 
-📁 **Output Files**:
-  - Dataset Manifest: `{result['manifest_path']}`
+📦 **Master Dataset (Cumulative)**:
+  - Previous Segments: {master_info.get('previous_segments', 0)}
+  - New Segments: {master_info.get('new_segments', 0)}
+  - 📈 **Total Accumulated**: {master_info.get('total_segments', 0)} segments
+  - Master Manifest: `{master_info.get('master_manifest_path', 'N/A')}`
+
+📁 **Individual Files**:
+  - Manifest: `{result['manifest_path']}`
   - Audio: `{result['audio_path']}`
   - Subtitles: `{result['srt_path']}`
-  - Segments: `{result['output_dir']}/segments/`
 
-🎯 **Next Steps**:
-  1. Review the generated segments
-  2. Use the manifest file for training
-  3. Combine with other datasets if needed
+🎯 **Your dataset is growing!** Each upload adds to the master manifest.
 """
             
             # Prepare preview data
@@ -1271,6 +1276,13 @@ with gr.Blocks(
                                 value=False,
                                 info="Extract vocals only - usually not needed for clean audio"
                             )
+                            
+                            local_append_mode = gr.Radio(
+                                choices=[("Append to existing dataset (Incremental)", True), ("Start fresh (Replace all)", False)],
+                                value=True,
+                                label="Dataset Mode",
+                                info="📈 Append: Adds to master_manifest.json | 🆕 Fresh: Creates new dataset"
+                            )
                         
                         with gr.Column():
                             local_min_duration = gr.Slider(
@@ -1324,7 +1336,8 @@ with gr.Blocks(
                             local_output_dir,
                             local_use_demucs,
                             local_min_duration,
-                            local_max_duration
+                            local_max_duration,
+                            local_append_mode
                         ],
                         outputs=[local_process_output, local_preview_dataframe, local_manifest_output]
                     )
