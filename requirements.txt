@@ -24,7 +24,7 @@ lightning>=2.1.0
 
 # Data handling
 pandas>=2.0.0
-numpy>=1.24.0
+numpy>=1.24.0,<2.0.0
 
 # Evaluation metrics
 jiwer>=3.0.0
