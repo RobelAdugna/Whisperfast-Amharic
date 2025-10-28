@@ -33,6 +33,7 @@ jiwer>=3.0.0
 tqdm>=4.66.0
 pyyaml>=6.0
 wandb>=0.16.0  # Optional: for experiment tracking
+gradio>=4.0.0  # For web interface
 
 # Amharic text processing
 # python-ethiopic>=0.7.0  # Package not available on PyPI - handle Ge'ez script with custom utilities if needed
