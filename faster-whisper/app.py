@@ -1242,20 +1242,18 @@ with gr.Blocks(
                     with gr.Row():
                         with gr.Column():
                             local_audio_file = gr.File(
-                                label="Audio File(s)",
+                                label="Audio File(s) - Upload one or more audio files (MP3, WAV, etc.)",
                                 file_types=["audio"],
                                 file_count="multiple",
-                                type="filepath",
-                                info="Upload one or more audio files (MP3, WAV, etc.)"
+                                type="filepath"
                             )
                         
                         with gr.Column():
                             local_srt_file = gr.File(
-                                label="SRT Subtitle File(s)",
+                                label="SRT Subtitle File(s) - Upload matching SRT files (same names as audio)",
                                 file_types=[".srt"],
                                 file_count="multiple",
-                                type="filepath",
-                                info="Upload matching SRT files (same names as audio)"
+                                type="filepath"
                             )
                     
                     gr.Markdown("### Processing Settings")
