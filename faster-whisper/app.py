@@ -20,6 +20,7 @@ try:
     from utils.audio_augmentation import AudioAugmentor
     from utils.amharic_processing import AmharicTextProcessor
     from utils.monitoring import MetricsCollector
+    from utils.youtube_dataset import YouTubeDatasetPreparator
     from ui_components.waveform import create_waveform_plot, create_spectrogram_plot, create_audio_stats_display
     from ui_components.metrics_dashboard import create_training_metrics_plot, create_realtime_loss_plot
     from ui_components.chat_interface import create_chat_interface, create_streaming_chat
@@ -337,6 +338,157 @@ def delete_checkpoint(checkpoint_path: str):
         return "❌ Checkpoint not found", gr.update()
     except Exception as e:
         return f"❌ Failed to delete checkpoint: {str(e)}", gr.update()
+
+def check_youtube_video(url: str):
+    """Check if YouTube video has Amharic subtitles"""
+    try:
+        if not url or not url.strip():
+            return "Please enter a YouTube URL"
+        
+        preparator = YouTubeDatasetPreparator()
+        info = preparator.check_youtube_link(url)
+        
+        result = f"""✅ Video Information:
+
+📹 **Title**: {info['title']}
+⏱️  **Duration**: {info['duration'] // 60}:{info['duration'] % 60:02d}
+👤 **Uploader**: {info['uploader']}
+🆔 **Video ID**: {info['video_id']}
+
+**Amharic Subtitles**:
+  - Manual SRT: {'✅ Available' if info['amharic_manual'] else '❌ Not available'}
+  - Auto-generated: {'✅ Available' if info['amharic_auto'] else '❌ Not available'}
+
+**All Available Subtitles**: {', '.join(info['available_subtitles']) if info['available_subtitles'] else 'None'}
+**Auto Captions**: {', '.join(info['available_auto_captions']) if info['available_auto_captions'] else 'None'}
+"""
+        return result
+    except Exception as e:
+        return f"❌ Error checking video: {str(e)}"
+
+def process_youtube_video(
+    url: str,
+    output_dir: str,
+    use_demucs: bool,
+    min_duration: float,
+    max_duration: float,
+    progress=gr.Progress()
+):
+    """Process a YouTube video to create dataset"""
+    try:
+        if not url or not url.strip():
+            return "Please enter a YouTube URL", None, ""
+        
+        progress(0, desc="Initializing...")
+        
+        preparator = YouTubeDatasetPreparator(
+            output_dir=output_dir,
+            use_demucs=use_demucs,
+            min_segment_duration=min_duration,
+            max_segment_duration=max_duration
+        )
+        
+        result = preparator.process_youtube_video(
+            url=url,
+            progress_callback=progress
+        )
+        
+        if not result['success']:
+            return f"❌ Processing failed: {result['error']}", None, ""
+        
+        # Create summary
+        summary = f"""✅ YouTube Dataset Created Successfully!
+
+📹 **Video**: {result['video_title']}
+🆔 **Video ID**: {result['video_id']}
+📊 **Total Segments**: {result['total_segments']}
+⏱️  **Total Duration**: {result['total_duration_minutes']:.1f} minutes ({result['total_duration_seconds']:.1f} seconds)
+
+📁 **Output Files**:
+  - Dataset Manifest: `{result['manifest_path']}`
+  - Full Audio: `{result['audio_path']}`
+  - Subtitles: `{result['srt_path']}`
+  - Segments: `{result['output_dir']}/segments/`
+
+🎯 **Next Steps**:
+  1. Review the generated segments
+  2. Use the manifest file for training
+  3. Combine with other datasets if needed
+"""
+        
+        # Prepare preview data
+        preview_data = []
+        for i, entry in enumerate(result['dataset_entries'][:10]):  # Show first 10
+            preview_data.append({
+                "Segment": i + 1,
+                "Duration": f"{entry['duration']:.2f}s",
+                "Text": entry['text'][:50] + "..." if len(entry['text']) > 50 else entry['text'],
+                "Audio File": entry['audio_path']
+            })
+        
+        return summary, preview_data, result['manifest_path']
+    
+    except Exception as e:
+        return f"❌ Processing failed: {str(e)}", None, ""
+
+def process_multiple_youtube_videos(
+    urls_text: str,
+    output_dir: str,
+    use_demucs: bool,
+    min_duration: float,
+    max_duration: float,
+    progress=gr.Progress()
+):
+    """Process multiple YouTube videos from text input (one URL per line)"""
+    try:
+        if not urls_text or not urls_text.strip():
+            return "Please enter YouTube URLs (one per line)", None, ""
+        
+        # Parse URLs
+        urls = [url.strip() for url in urls_text.split('\n') if url.strip()]
+        
+        if not urls:
+            return "No valid URLs found", None, ""
+        
+        progress(0, desc=f"Processing {len(urls)} videos...")
+        
+        preparator = YouTubeDatasetPreparator(
+            output_dir=output_dir,
+            use_demucs=use_demucs,
+            min_segment_duration=min_duration,
+            max_segment_duration=max_duration
+        )
+        
+        result = preparator.process_multiple_videos(
+            urls=urls,
+            progress_callback=progress
+        )
+        
+        # Create summary
+        summary = f"""✅ Batch Processing Complete!
+
+📊 **Statistics**:
+  - Total Videos: {result['total_videos']}
+  - Successful: {result['successful']}
+  - Failed: {result['failed']}
+  - Total Segments: {result['total_segments']}
+  - Total Duration: {result['total_duration_minutes']:.1f} minutes
+
+📁 **Combined Manifest**: `{result['combined_manifest']}`
+
+📹 **Individual Results**:
+"""
+        
+        for i, res in enumerate(result['results'], 1):
+            if res['success']:
+                summary += f"\n  {i}. ✅ {res['video_title'][:40]}... ({res['total_segments']} segments)"
+            else:
+                summary += f"\n  {i}. ❌ Failed: {res['error']}"
+        
+        return summary, None, result['combined_manifest']
+    
+    except Exception as e:
+        return f"❌ Batch processing failed: {str(e)}", None, ""
 
 # Create custom theme with dark mode support
 custom_theme = gr.themes.Soft(
@@ -809,6 +961,210 @@ with gr.Blocks(
                     outputs=[chat_history, chat_text_input, chat_audio_input]
                 )
         
+        # ===== YOUTUBE DATASET PREPARATION TAB =====
+        with gr.Tab("🎬 YouTube Dataset"):
+            gr.Markdown("""
+            ### YouTube Dataset Preparation
+            
+            Create high-quality Amharic Whisper datasets from YouTube videos with subtitles.
+            
+            **Features**:
+            - ✅ Automatic Amharic subtitle detection
+            - ✅ Background music removal using Demucs
+            - ✅ Precise audio segmentation
+            - ✅ SOTA-level dataset quality
+            - ✅ Batch processing support
+            """)
+            
+            with gr.Tabs():
+                # Single Video Processing
+                with gr.Tab("Single Video"):
+                    with gr.Row():
+                        with gr.Column():
+                            youtube_url = gr.Textbox(
+                                label="YouTube URL",
+                                placeholder="https://www.youtube.com/watch?v=...",
+                                info="Enter a YouTube video URL with Amharic subtitles"
+                            )
+                            
+                            check_btn = gr.Button("🔍 Check Video", variant="secondary")
+                            check_output = gr.Textbox(
+                                label="Video Information",
+                                lines=10,
+                                interactive=False
+                            )
+                    
+                    gr.Markdown("### Processing Settings")
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            youtube_output_dir = gr.Textbox(
+                                label="Output Directory",
+                                value="./data/youtube_amharic",
+                                info="Where to save the processed dataset"
+                            )
+                            
+                            use_demucs_checkbox = gr.Checkbox(
+                                label="Remove Background Music (Demucs)",
+                                value=True,
+                                info="Extract vocals only - requires Demucs installed"
+                            )
+                        
+                        with gr.Column():
+                            min_seg_duration = gr.Slider(
+                                minimum=0.5,
+                                maximum=5.0,
+                                value=1.0,
+                                step=0.1,
+                                label="Minimum Segment Duration (seconds)"
+                            )
+                            
+                            max_seg_duration = gr.Slider(
+                                minimum=10.0,
+                                maximum=30.0,
+                                value=25.0,
+                                step=1.0,
+                                label="Maximum Segment Duration (seconds)"
+                            )
+                    
+                    process_single_btn = gr.Button(
+                        "🚀 Process Video & Create Dataset",
+                        variant="primary",
+                        size="lg"
+                    )
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            process_output = gr.Textbox(
+                                label="Processing Results",
+                                lines=12
+                            )
+                        
+                        with gr.Column():
+                            preview_dataframe = gr.Dataframe(
+                                label="Dataset Preview (First 10 segments)",
+                                headers=["Segment", "Duration", "Text", "Audio File"],
+                                interactive=False
+                            )
+                    
+                    manifest_path_output = gr.Textbox(
+                        label="Manifest Path",
+                        interactive=False,
+                        visible=False
+                    )
+                    
+                    # Wire up single video processing
+                    check_btn.click(
+                        fn=check_youtube_video,
+                        inputs=youtube_url,
+                        outputs=check_output
+                    )
+                    
+                    process_single_btn.click(
+                        fn=process_youtube_video,
+                        inputs=[
+                            youtube_url,
+                            youtube_output_dir,
+                            use_demucs_checkbox,
+                            min_seg_duration,
+                            max_seg_duration
+                        ],
+                        outputs=[process_output, preview_dataframe, manifest_path_output]
+                    )
+                
+                # Batch Processing
+                with gr.Tab("Batch Processing"):
+                    gr.Markdown("""
+                    ### Process Multiple Videos
+                    
+                    Enter multiple YouTube URLs (one per line) to create a large dataset.
+                    """)
+                    
+                    with gr.Row():
+                        batch_urls = gr.Textbox(
+                            label="YouTube URLs (one per line)",
+                            lines=10,
+                            placeholder="https://www.youtube.com/watch?v=...\nhttps://www.youtube.com/watch?v=...",
+                            info="Enter YouTube video URLs, one per line"
+                        )
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            batch_output_dir = gr.Textbox(
+                                label="Output Directory",
+                                value="./data/youtube_amharic",
+                                info="Where to save the combined dataset"
+                            )
+                            
+                            batch_use_demucs = gr.Checkbox(
+                                label="Remove Background Music (Demucs)",
+                                value=True
+                            )
+                        
+                        with gr.Column():
+                            batch_min_duration = gr.Slider(
+                                minimum=0.5,
+                                maximum=5.0,
+                                value=1.0,
+                                step=0.1,
+                                label="Minimum Segment Duration (seconds)"
+                            )
+                            
+                            batch_max_duration = gr.Slider(
+                                minimum=10.0,
+                                maximum=30.0,
+                                value=25.0,
+                                step=1.0,
+                                label="Maximum Segment Duration (seconds)"
+                            )
+                    
+                    process_batch_btn = gr.Button(
+                        "🚀 Process All Videos",
+                        variant="primary",
+                        size="lg"
+                    )
+                    
+                    batch_output = gr.Textbox(
+                        label="Batch Processing Results",
+                        lines=15
+                    )
+                    
+                    batch_manifest_output = gr.Textbox(
+                        label="Combined Manifest Path",
+                        interactive=False,
+                        visible=False
+                    )
+                    
+                    # Wire up batch processing
+                    process_batch_btn.click(
+                        fn=process_multiple_youtube_videos,
+                        inputs=[
+                            batch_urls,
+                            batch_output_dir,
+                            batch_use_demucs,
+                            batch_min_duration,
+                            batch_max_duration
+                        ],
+                        outputs=[batch_output, preview_dataframe, batch_manifest_output]
+                    )
+            
+            gr.Markdown("""
+            ---
+            ### 💡 Tips
+            
+            1. **Finding Videos**: Look for Amharic YouTube videos with closed captions (CC)
+            2. **Quality**: Manual subtitles are preferred over auto-generated
+            3. **Demucs**: Improves quality but requires installation and is slower
+            4. **Duration**: Whisper works best with 1-25 second segments
+            5. **Batch Processing**: Process multiple videos to create larger datasets
+            
+            ### 📦 Requirements
+            
+            ```bash
+            pip install yt-dlp demucs
+            ```
+            """)
+        
         # ===== METRICS DASHBOARD TAB =====
         if ENHANCED_FEATURES_AVAILABLE:
             with gr.Tab("📊 Metrics Dashboard"):
@@ -874,6 +1230,7 @@ with gr.Blocks(
     ---
     ### 📝 Notes
     - **Training**: Start by preparing your LJSpeech dataset, then configure and start training
+    - **YouTube Dataset**: Create datasets from YouTube videos with Amharic subtitles
     - **Checkpoints**: Best checkpoints are automatically saved during training
     - **Resume**: Select a checkpoint to resume training from where you left off
     - **Inference**: Use trained models or checkpoints to transcribe audio with enhanced visualizations
