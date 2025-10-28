@@ -1,6 +1,10 @@
 # Google Colab Requirements for Amharic Whisper Fine-Tuning
-# Optimized for Colab's Python 3.10 environment with pre-installed packages
-# Last updated: 2024
+# Optimized for Colab's Python 3.12 environment with pre-installed packages
+# Last updated: 2025
+#
+# IMPORTANT: Install system dependencies FIRST before running pip install:
+# !apt-get update && apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev
+# Then run: !pip install -r requirements-colab.txt
 
 # =============================================================================
 # Core ML Libraries (Compatible with Colab's CUDA 12.2)
@@ -43,8 +47,10 @@ bitsandbytes==0.41.3
 # =============================================================================
 # Fast Inference
 # =============================================================================
-faster-whisper==0.10.0
-ctranslate2==3.24.0
+# Note: Install system dependencies first in Colab:
+# !apt-get update && apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev
+faster-whisper>=1.0.0
+ctranslate2>=3.24.0
 
 # =============================================================================
 # Gradio UI (Colab-friendly version)
