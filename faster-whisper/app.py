@@ -884,10 +884,16 @@ with gr.Blocks(
     """)
 
 if __name__ == "__main__":
+    import sys
+    
+    # Check if running in Colab or if --share flag is passed
+    is_colab = 'google.colab' in sys.modules
+    share = is_colab or '--share' in sys.argv
+    
     demo.queue(max_size=50, default_concurrency_limit=1)
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=False,
+        share=share,
         show_error=True
     )
