@@ -6,7 +6,7 @@ from typing import Optional, Union
 try:
     from audiomentations import (
         Compose, AddGaussianNoise, TimeStretch, PitchShift,
-        Shift, Normalize, AddBackgroundNoise, RoomSimulator
+        Normalize
     )
     AUDIOMENTATIONS_AVAILABLE = True
 except ImportError:
@@ -46,11 +46,6 @@ class AudioAugmentor:
                 PitchShift(
                     min_semitones=-2,
                     max_semitones=2,
-                    p=0.3
-                ),
-                Shift(
-                    min_shift=-0.5,
-                    max_shift=0.5,
                     p=0.3
                 ),
             ])
