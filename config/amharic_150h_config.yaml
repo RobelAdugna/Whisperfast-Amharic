@@ -1,0 +1,188 @@
+# Optimized Whisper Fine-tuning Configuration for 150-hour Amharic Dataset
+# Designed for SOTA performance on low-resource Amharic ASR
+
+model:
+  name: "openai/whisper-medium"  # Medium recommended for 150h dataset
+  language: "am"  # Amharic
+  task: "transcribe"
+  freeze_encoder: false  # Full fine-tuning for better Amharic adaptation
+  
+data:
+  train_manifest: "data/amharic/train_manifest.json"
+  val_manifest: "data/amharic/val_manifest.json"
+  test_manifest: "data/amharic/test_manifest.json"
+  
+  # Data processing
+  sample_rate: 16000
+  n_mels: 80
+  
+  # Duration filtering (optimized for Amharic speech patterns)
+  min_duration: 1.0  # seconds
+  max_duration: 25.0  # seconds (Amharic tends to have longer utterances)
+  
+  # Text normalization
+  normalize_text: true
+  normalize_numerals: true  # Convert Ethiopic numerals
+  normalize_punctuation: true  # Standardize Ge'ez punctuation
+  remove_code_switching: false  # Keep for realistic scenarios
+  
+  # Quality thresholds
+  quality_threshold: 0.85  # Amharic text quality score
+  
+training:
+  # Optimized for 150 hours (~135h after filtering)
+  num_epochs: 15  # Sufficient for 150h dataset
+  batch_size: 16  # Adjust based on GPU memory
+  gradient_accumulation_steps: 4  # Effective batch size = 64
+  
+  # Learning rate schedule (critical for Amharic)
+  learning_rate: 5e-5  # Higher than default for faster adaptation
+  warmup_steps: 500  # Gradual warmup
+  lr_scheduler: "cosine"  # Cosine annealing
+  min_lr: 1e-6
+  
+  # Optimization
+  optimizer: "adamw"
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1e-8
+  
+  # Gradient management
+  gradient_clip_val: 1.0
+  max_grad_norm: 1.0
+  
+  # Precision
+  precision: 16  # Mixed precision for faster training
+  use_amp: true
+  
+  # Regularization (important for avoiding overfitting)
+  dropout: 0.1
+  attention_dropout: 0.1
+  activation_dropout: 0.0
+  label_smoothing: 0.1  # Help with Amharic label noise
+  
+augmentation:
+  # Audio augmentation (critical for robustness)
+  enable: true
+  augmentation_prob: 0.5  # Apply to 50% of samples
+  
+  # Specific augmentations
+  add_noise: true
+  noise_level: 0.005
+  
+  time_stretch: true
+  time_stretch_range: [0.9, 1.1]
+  
+  pitch_shift: true
+  pitch_shift_range: [-2, 2]  # semitones
+  
+  spec_augment: true
+  freq_mask_param: 15
+  time_mask_param: 35
+  n_freq_masks: 2
+  n_time_masks: 2
+  
+  # Amharic-specific augmentations
+  simulate_dialects: true  # Simulate dialectal variations
+  add_background_noise: true
+  
+evaluation:
+  # Amharic-specific metrics
+  metrics:
+    - "wer"  # Word Error Rate
+    - "cer"  # Character Error Rate  
+    - "ser"  # Syllable Error Rate (Ge'ez-specific)
+  
+  # Evaluation frequency
+  val_check_interval: 0.25  # Every 25% of epoch
+  
+  # Beam search (optimized for Amharic)
+  beam_size: 5
+  length_penalty: 1.0
+  no_repeat_ngram_size: 3
+  
+callbacks:
+  # Model checkpointing
+  checkpoint:
+    save_top_k: 3
+    monitor: "val_wer"
+    mode: "min"
+    save_last: true
+    filename: "whisper-amharic-{epoch:02d}-{val_wer:.2f}"
+  
+  # Early stopping
+  early_stopping:
+    monitor: "val_wer"
+    patience: 5
+    mode: "min"
+    min_delta: 0.001
+  
+  # Learning rate monitoring
+  lr_monitor:
+    logging_interval: "step"
+  
+  # Custom Amharic metrics logging
+  custom_metrics:
+    log_error_patterns: true
+    log_dialect_performance: true
+    log_code_switching_accuracy: true
+  
+logging:
+  # Experiment tracking
+  use_wandb: true
+  wandb_project: "whisper-amharic-150h"
+  wandb_entity: null  # Set your W&B entity
+  
+  use_tensorboard: true
+  tensorboard_dir: "./lightning_logs"
+  
+  # Logging frequency
+  log_every_n_steps: 50
+  
+deployment:
+  # Model export
+  export_onnx: true
+  export_ctranslate2: true
+  
+  # Quantization
+  quantize: true
+  quantization_mode: "int8"  # For faster inference
+  
+compute:
+  # Hardware optimization
+  num_workers: 4  # Data loading workers
+  pin_memory: true
+  
+  # Multi-GPU (if available)
+  strategy: "ddp"  # Distributed Data Parallel
+  devices: "auto"  # Auto-detect GPUs
+  
+  # DeepSpeed (for large-scale training)
+  use_deepspeed: false  # Enable if training large model
+  deepspeed_config: null
+  
+amharic_specific:
+  # Ge'ez script handling
+  preserve_geez_punctuation: true
+  handle_ethiopic_numerals: true
+  
+  # Dialect awareness
+  recognize_dialects: true
+  dialect_tags: ["gonder", "shewa", "gojjam", "wollo", "harari"]
+  
+  # Code-switching
+  handle_code_switching: true
+  code_switch_languages: ["en"]  # Amharic-English common
+  
+  # Domain adaptation
+  domain_tags: ["conversational", "news", "religious", "formal"]
+  
+  # Quality filtering
+  filter_low_quality: true
+  quality_threshold: 0.8
+  
+  # Speaker diversity
+  balance_speakers: true
+  min_samples_per_speaker: 10
+  max_samples_per_speaker: 1000  # Prevent speaker imbalance

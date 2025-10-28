@@ -7,11 +7,26 @@ import lightning as L
 from datetime import datetime
 from typing import Dict, List, Optional
 import glob
+import numpy as np
 
 # Import training and inference modules
 from train_whisper_lightning import WhisperLightningModule, AmharicDataModule, start_training
 from inference_utils import load_model_for_inference, transcribe_audio
 from prepare_ljspeech_dataset import prepare_dataset
+
+# Import new utilities and components
+try:
+    from utils.vad import VADProcessor
+    from utils.audio_augmentation import AudioAugmentor
+    from utils.amharic_processing import AmharicTextProcessor
+    from utils.monitoring import MetricsCollector
+    from ui_components.waveform import create_waveform_plot, create_spectrogram_plot, create_audio_stats_display
+    from ui_components.metrics_dashboard import create_training_metrics_plot, create_realtime_loss_plot
+    from ui_components.chat_interface import create_chat_interface, create_streaming_chat
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Some enhanced features not available: {e}")
+    ENHANCED_FEATURES_AVAILABLE = False
 
 # Global state for managing checkpoints and models
 CHECKPOINT_DIR = "./checkpoints"
@@ -21,6 +36,27 @@ CT2_MODEL_DIR = "./whisper_ct2_model"
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Initialize enhanced components if available
+if ENHANCED_FEATURES_AVAILABLE:
+    vad_processor = VADProcessor()
+    audio_augmentor = AudioAugmentor()
+    amharic_processor = AmharicTextProcessor()
+    metrics_collector = MetricsCollector()
+else:
+    vad_processor = None
+    audio_augmentor = None
+    amharic_processor = None
+    metrics_collector = None
+
+# Global metrics storage for live updates
+training_metrics = {
+    'loss': [],
+    'val_loss': [],
+    'wer': [],
+    'lr': [],
+    'grad_norm': []
+}
 
 def get_available_checkpoints() -> List[str]:
     """List all available checkpoint files"""
@@ -197,14 +233,48 @@ def transcribe(
     language: str,
     task: str,
     beam_size: int,
+    show_waveform: bool = True,
+    show_spectrogram: bool = False,
+    use_vad: bool = True,
     progress=gr.Progress()
 ):
-    """Transcribe audio using trained model"""
+    """Transcribe audio using trained model with enhanced visualizations"""
     try:
         progress(0, desc="Loading model...")
         
         if not audio_file:
-            return "Please upload an audio file"
+            return "Please upload an audio file", None, None, None, ""
+        
+        # Load audio for visualization
+        import soundfile as sf
+        audio_data, sample_rate = sf.read(audio_file)
+        
+        # Create visualizations if enabled
+        waveform_fig = None
+        spectrogram_fig = None
+        stats_text = ""
+        
+        if ENHANCED_FEATURES_AVAILABLE and show_waveform:
+            progress(0.1, desc="Creating waveform...")
+            
+            # Detect speech segments with VAD if enabled
+            speech_segments = None
+            if use_vad and vad_processor:
+                speech_segments = vad_processor.get_speech_segments(audio_data)
+            
+            waveform_fig = create_waveform_plot(
+                audio_data,
+                sample_rate,
+                highlight_segments=speech_segments
+            )
+        
+        if ENHANCED_FEATURES_AVAILABLE and show_spectrogram:
+            progress(0.2, desc="Creating spectrogram...")
+            spectrogram_fig = create_spectrogram_plot(audio_data, sample_rate)
+        
+        if ENHANCED_FEATURES_AVAILABLE:
+            stats = create_audio_stats_display(audio_data, sample_rate)
+            stats_text = "\n".join([f"**{k}**: {v}" for k, v in stats.items()])
         
         progress(0.3, desc="Transcribing...")
         
@@ -216,12 +286,17 @@ def transcribe(
             beam_size=beam_size
         )
         
+        # Post-process with Amharic normalization if available
+        transcript = result['text']
+        if ENHANCED_FEATURES_AVAILABLE and amharic_processor and language == 'am':
+            transcript = amharic_processor.normalize_text(transcript)
+        
         progress(1.0, desc="Transcription complete!")
         
-        return result['text']
+        return transcript, waveform_fig, spectrogram_fig, result.get('segments', []), stats_text
         
     except Exception as e:
-        return f"❌ Transcription failed: {str(e)}"
+        return f"❌ Transcription failed: {str(e)}", None, None, None, ""
 
 def delete_checkpoint(checkpoint_path: str):
     """Delete a checkpoint file"""
@@ -239,8 +314,34 @@ def delete_checkpoint(checkpoint_path: str):
     except Exception as e:
         return f"❌ Failed to delete checkpoint: {str(e)}", gr.update()
 
+# Create custom theme with dark mode support
+custom_theme = gr.themes.Soft(
+    primary_hue="blue",
+    secondary_hue="slate",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter"), "sans-serif"],
+).set(
+    button_primary_background_fill="*primary_600",
+    button_primary_background_fill_hover="*primary_700",
+    button_primary_text_color="white",
+    block_title_text_weight="600",
+    block_label_text_weight="600",
+)
+
 # Create Gradio Interface
-with gr.Blocks(title="Amharic Whisper Fine-Tuning", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(
+    title="Amharic Whisper Fine-Tuning - SOTA Enhanced",
+    theme=custom_theme,
+    css="""
+    .gradio-container {
+        max-width: 1400px !important;
+    }
+    .tab-nav button {
+        font-size: 16px;
+        font-weight: 500;
+    }
+    """
+) as demo:
     gr.Markdown("""
     # 🎙️ Amharic Whisper Fine-Tuning & Inference
     
@@ -450,6 +551,20 @@ with gr.Blocks(title="Amharic Whisper Fine-Tuning", theme=gr.themes.Soft()) as d
                     label="Beam Size"
                 )
             
+            with gr.Row():
+                show_waveform = gr.Checkbox(
+                    label="Show Waveform",
+                    value=True
+                )
+                show_spectrogram = gr.Checkbox(
+                    label="Show Spectrogram",
+                    value=False
+                )
+                use_vad = gr.Checkbox(
+                    label="Use Voice Activity Detection",
+                    value=True
+                )
+            
             gr.Markdown("### Audio Input")
             
             with gr.Row():
@@ -464,11 +579,36 @@ with gr.Blocks(title="Amharic Whisper Fine-Tuning", theme=gr.themes.Soft()) as d
                 )
             
             transcribe_btn = gr.Button("🎙️ Transcribe", variant="primary", size="lg")
-            transcription_output = gr.Textbox(
-                label="Transcription",
-                lines=10,
-                placeholder="Transcribed text will appear here..."
-            )
+            
+            with gr.Row():
+                with gr.Column(scale=2):
+                    transcription_output = gr.Textbox(
+                        label="Transcription",
+                        lines=8,
+                        placeholder="Transcribed text will appear here..."
+                    )
+                    
+                    audio_stats = gr.Markdown(
+                        label="Audio Statistics",
+                        value="Audio stats will appear here..."
+                    )
+                
+                with gr.Column(scale=1):
+                    segments_output = gr.JSON(
+                        label="Segments (with timestamps)",
+                        visible=True
+                    )
+            
+            with gr.Row():
+                waveform_plot = gr.Plot(
+                    label="Waveform Visualization"
+                )
+            
+            with gr.Row():
+                spectrogram_plot = gr.Plot(
+                    label="Spectrogram",
+                    visible=False
+                )
             
             # Wire up inference tab events
             model_type.change(
@@ -477,19 +617,219 @@ with gr.Blocks(title="Amharic Whisper Fine-Tuning", theme=gr.themes.Soft()) as d
                 outputs=inference_checkpoint_dropdown
             )
             
-            def get_audio_source(audio, mic):
-                return audio if audio else mic
+            show_spectrogram.change(
+                fn=lambda x: gr.update(visible=x),
+                inputs=show_spectrogram,
+                outputs=spectrogram_plot
+            )
             
             transcribe_btn.click(
-                fn=lambda a, m, mp, lang, t, bs: transcribe(
-                    a if a else m, mp, lang, t, bs
+                fn=lambda a, m, mp, lang, t, bs, sw, ss, vad: transcribe(
+                    a if a else m, mp, lang, t, bs, sw, ss, vad
                 ),
                 inputs=[
                     audio_input, microphone_input, inference_model_path,
-                    inference_language, task, beam_size
+                    inference_language, task, beam_size,
+                    show_waveform, show_spectrogram, use_vad
                 ],
-                outputs=transcription_output
+                outputs=[transcription_output, waveform_plot, spectrogram_plot, segments_output, audio_stats]
             )
+    
+        # ===== STREAMING TAB =====
+        if ENHANCED_FEATURES_AVAILABLE:
+            with gr.Tab("🎙️ Real-time Streaming"):
+                gr.Markdown("""
+                ### Real-time Streaming Transcription
+                Speak into your microphone for live transcription with Voice Activity Detection.
+                """)
+                
+                streaming_state = gr.State({})
+                
+                with gr.Row():
+                    streaming_audio = gr.Audio(
+                        label="Microphone (Streaming)",
+                        sources=["microphone"],
+                        streaming=True,
+                        type="numpy"
+                    )
+                
+                with gr.Row():
+                    streaming_transcript = gr.Textbox(
+                        label="Live Transcript",
+                        lines=12,
+                        interactive=False,
+                        placeholder="Start speaking to see real-time transcription..."
+                    )
+                
+                with gr.Row():
+                    vad_status = gr.Textbox(
+                        label="VAD Status",
+                        value="Waiting for speech...",
+                        interactive=False
+                    )
+                    confidence_display = gr.Number(
+                        label="Speech Confidence",
+                        value=0.0,
+                        interactive=False
+                    )
+                
+                with gr.Row():
+                    clear_streaming = gr.Button("🗑️ Clear Transcript")
+                    pause_streaming = gr.Button("⏸️ Pause")
+                
+                # Placeholder for streaming function - would need actual implementation
+                gr.Markdown("""
+                **Note**: Full streaming implementation requires WebSocket backend.
+                This is a placeholder for the streaming interface.
+                """)
+                
+                clear_streaming.click(
+                    fn=lambda: ("", {}, "Cleared", 0.0),
+                    outputs=[streaming_transcript, streaming_state, vad_status, confidence_display]
+                )
+        
+        # ===== CHAT INTERFACE TAB =====
+        if ENHANCED_FEATURES_AVAILABLE:
+            with gr.Tab("💬 Chat Interface"):
+                gr.Markdown("""
+                ### Multimodal Chat Interface
+                Interact using voice or text. Audio messages will be automatically transcribed.
+                """)
+                
+                chat_history = gr.Chatbot(
+                    label="Conversation",
+                    height=450,
+                    type="tuples"
+                )
+                
+                with gr.Row():
+                    with gr.Column(scale=3):
+                        chat_text_input = gr.Textbox(
+                            label="Type a message",
+                            placeholder="Type here or use microphone...",
+                            lines=2
+                        )
+                    with gr.Column(scale=1):
+                        chat_audio_input = gr.Audio(
+                            label="🎤 Record Message",
+                            sources=["microphone"],
+                            type="filepath"
+                        )
+                
+                with gr.Row():
+                    chat_clear_btn = gr.Button("🗑️ Clear Chat")
+                    chat_send_btn = gr.Button("📤 Send", variant="primary")
+                
+                def handle_chat_text(text, history):
+                    if not text.strip():
+                        return history, ""
+                    response = f"Echo: {text}"
+                    history.append((text, response))
+                    return history, ""
+                
+                def handle_chat_audio(audio, history):
+                    if audio is None:
+                        return history, None
+                    try:
+                        # Transcribe audio
+                        result = transcribe_audio(
+                            audio_path=audio,
+                            model_path=MODEL_DIR,
+                            language="am",
+                            task="transcribe",
+                            beam_size=5
+                        )
+                        transcript = result['text']
+                        response = f"Transcribed: {transcript}"
+                        history.append((f"🎤 {transcript}", response))
+                        return history, None
+                    except Exception as e:
+                        history.append(("🎤 [Audio]", f"Error: {str(e)}"))
+                        return history, None
+                
+                chat_text_input.submit(
+                    fn=handle_chat_text,
+                    inputs=[chat_text_input, chat_history],
+                    outputs=[chat_history, chat_text_input]
+                )
+                
+                chat_send_btn.click(
+                    fn=handle_chat_text,
+                    inputs=[chat_text_input, chat_history],
+                    outputs=[chat_history, chat_text_input]
+                )
+                
+                chat_audio_input.change(
+                    fn=handle_chat_audio,
+                    inputs=[chat_audio_input, chat_history],
+                    outputs=[chat_history, chat_audio_input]
+                )
+                
+                chat_clear_btn.click(
+                    fn=lambda: ([], "", None),
+                    outputs=[chat_history, chat_text_input, chat_audio_input]
+                )
+        
+        # ===== METRICS DASHBOARD TAB =====
+        if ENHANCED_FEATURES_AVAILABLE:
+            with gr.Tab("📊 Metrics Dashboard"):
+                gr.Markdown("""
+                ### Training Metrics Dashboard
+                Monitor training progress with live metrics visualization.
+                """)
+                
+                with gr.Row():
+                    refresh_metrics_btn = gr.Button("🔄 Refresh Metrics", variant="secondary")
+                
+                metrics_plot = gr.Plot(
+                    label="Training Metrics",
+                    value=create_training_metrics_plot(training_metrics)
+                )
+                
+                with gr.Row():
+                    with gr.Column():
+                        current_loss = gr.Number(
+                            label="Current Loss",
+                            value=0.0,
+                            interactive=False
+                        )
+                        current_wer = gr.Number(
+                            label="Current WER (%)",
+                            value=0.0,
+                            interactive=False
+                        )
+                    with gr.Column():
+                        best_loss = gr.Number(
+                            label="Best Loss",
+                            value=0.0,
+                            interactive=False
+                        )
+                        best_wer = gr.Number(
+                            label="Best WER (%)",
+                            value=0.0,
+                            interactive=False
+                        )
+                
+                realtime_loss_plot = gr.Plot(
+                    label="Real-time Loss (Last 100 steps)"
+                )
+                
+                def refresh_metrics():
+                    fig = create_training_metrics_plot(training_metrics)
+                    
+                    curr_loss = training_metrics['loss'][-1] if training_metrics['loss'] else 0.0
+                    curr_wer = training_metrics['wer'][-1] if training_metrics['wer'] else 0.0
+                    b_loss = min(training_metrics['loss']) if training_metrics['loss'] else 0.0
+                    b_wer = min(training_metrics['wer']) if training_metrics['wer'] else 0.0
+                    
+                    loss_fig = create_realtime_loss_plot(training_metrics['loss'])
+                    
+                    return fig, curr_loss, curr_wer, b_loss, b_wer, loss_fig
+                
+                refresh_metrics_btn.click(
+                    fn=refresh_metrics,
+                    outputs=[metrics_plot, current_loss, current_wer, best_loss, best_wer, realtime_loss_plot]
+                )
     
     gr.Markdown("""
     ---
@@ -497,7 +837,10 @@ with gr.Blocks(title="Amharic Whisper Fine-Tuning", theme=gr.themes.Soft()) as d
     - **Training**: Start by preparing your LJSpeech dataset, then configure and start training
     - **Checkpoints**: Best checkpoints are automatically saved during training
     - **Resume**: Select a checkpoint to resume training from where you left off
-    - **Inference**: Use trained models or checkpoints to transcribe audio
+    - **Inference**: Use trained models or checkpoints to transcribe audio with enhanced visualizations
+    - **Streaming**: Real-time transcription with Voice Activity Detection (VAD)
+    - **Chat**: Multimodal interface supporting both text and voice input
+    - **Metrics**: Live training metrics dashboard for monitoring progress
     - **Lightning AI**: This interface is optimized for remote training on Lightning AI Studio
     """)
 

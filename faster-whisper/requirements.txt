@@ -23,7 +23,7 @@ ctranslate2>=3.20.0
 faster-whisper>=0.9.0
 
 # Gradio UI
-gradio>=4.0.0
+gradio[oauth]>=4.14.0
 
 # Data Processing
 pandas>=2.0.0
@@ -39,5 +39,35 @@ tqdm>=4.66.0
 python-dotenv>=1.0.0
 pyyaml>=6.0
 
-# Optional: For Amharic text processing
+# Audio Augmentation
+audiomentations>=1.4.0
+torch-audiomentations>=0.11.0
+
+# Voice Activity Detection
+silero-vad>=4.0.0
+
+# Model Optimization
+onnx>=1.15.0
+onnxruntime-gpu>=1.16.0
+
+# UI Enhancements
+plotly>=5.18.0
+
+# Hyperparameter Optimization
+optuna>=3.5.0
+
+# API Server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Monitoring
+prometheus-client>=0.19.0
+sentry-sdk>=1.40.0
+
+# WebSocket Support
+websockets>=12.0
+
+# Amharic Text Processing
 unicodedataplus>=0.0.1
+ethiopic>=0.8.0

@@ -1,0 +1,43 @@
+# Prometheus configuration for Whisper monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'whisper-amharic'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093
+
+# Scrape configurations
+scrape_configs:
+  # FastAPI metrics
+  - job_name: 'whisper-api'
+    static_configs:
+      - targets: ['api:8000']
+        labels:
+          service: 'api'
+    
+  # Gradio metrics
+  - job_name: 'whisper-gradio'
+    static_configs:
+      - targets: ['gradio:7860']
+        labels:
+          service: 'gradio'
+  
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+# Recording rules (optional)
+# rule_files:
+#   - 'recording_rules.yml'
+#   - 'alerting_rules.yml'
