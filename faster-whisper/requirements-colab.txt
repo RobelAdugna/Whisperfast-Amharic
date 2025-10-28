@@ -122,8 +122,8 @@ websockets==12.0
 # =============================================================================
 # Amharic Text Processing
 # =============================================================================
-# ethiopic package (if available)
-ethiopic==0.8.0
+# ethiopic package (not available on PyPI - implement custom processing if needed)
+# ethiopic==0.8.0
 
 # =============================================================================
 # NOTES FOR COLAB USERS
