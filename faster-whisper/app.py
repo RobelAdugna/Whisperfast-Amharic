@@ -698,8 +698,7 @@ with gr.Blocks(
                 
                 chat_history = gr.Chatbot(
                     label="Conversation",
-                    height=450,
-                    type="tuples"
+                    height=450
                 )
                 
                 with gr.Row():
