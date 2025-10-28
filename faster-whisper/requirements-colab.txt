@@ -1,0 +1,183 @@
+# Google Colab Requirements for Amharic Whisper Fine-Tuning
+# Optimized for Colab's Python 3.10 environment with pre-installed packages
+# Last updated: 2024
+
+# =============================================================================
+# Core ML Libraries (Compatible with Colab's CUDA 12.2)
+# =============================================================================
+torch==2.1.0
+torchaudio==2.1.0
+torchvision==0.16.0
+
+# Hugging Face ecosystem
+transformers==4.35.2
+datasets==2.14.6
+evaluate==0.4.1
+accelerate==0.25.0
+
+# Audio processing
+librosa==0.10.1
+soundfile==0.12.1
+
+# ASR metrics
+jiwer==3.0.3
+
+# =============================================================================
+# Lightning AI (For Training)
+# =============================================================================
+lightning==2.1.3
+torchmetrics==1.2.1
+
+# =============================================================================
+# Efficient Training & Optimization
+# =============================================================================
+# DeepSpeed (Colab compatible version)
+deepspeed==0.12.6
+
+# PEFT for LoRA
+peft==0.7.1
+
+# bitsandbytes for quantization (Colab has CUDA 12.2)
+bitsandbytes==0.41.3
+
+# =============================================================================
+# Fast Inference
+# =============================================================================
+faster-whisper==0.10.0
+ctranslate2==3.24.0
+
+# =============================================================================
+# Gradio UI (Colab-friendly version)
+# =============================================================================
+gradio==4.8.0
+
+# =============================================================================
+# Data Processing
+# =============================================================================
+pandas==2.0.3
+numpy==1.24.3  # Colab compatible
+scipy==1.11.4
+scikit-learn==1.3.2
+
+# =============================================================================
+# Experiment Tracking (Colab integration)
+# =============================================================================
+# W&B (optional, comment out if not needed)
+wandb==0.16.1
+
+# TensorBoard (built into Colab)
+tensorboard==2.15.1
+
+# =============================================================================
+# Utilities
+# =============================================================================
+tqdm==4.66.1
+python-dotenv==1.0.0
+PyYAML==6.0.1
+
+# =============================================================================
+# Audio Augmentation
+# =============================================================================
+audiomentations==0.33.0
+# torch-audiomentations - Skip on Colab (can cause conflicts)
+
+# =============================================================================
+# Voice Activity Detection
+# =============================================================================
+# Silero VAD (loaded via torch.hub, no pip install needed)
+# silero-vad - Not needed, use torch.hub.load instead
+
+# =============================================================================
+# Model Optimization
+# =============================================================================
+onnx==1.15.0
+onnxruntime-gpu==1.16.3  # GPU version for Colab
+
+# =============================================================================
+# UI Enhancements
+# =============================================================================
+plotly==5.18.0
+
+# =============================================================================
+# Hyperparameter Optimization (Optional)
+# =============================================================================
+# Uncomment if needed
+# optuna==3.5.0
+
+# =============================================================================
+# API Server (If running in Colab)
+# =============================================================================
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# =============================================================================
+# Monitoring (Lightweight for Colab)
+# =============================================================================
+prometheus-client==0.19.0
+
+# WebSocket
+websockets==12.0
+
+# =============================================================================
+# Amharic Text Processing
+# =============================================================================
+# ethiopic package (if available)
+ethiopic==0.8.0
+
+# =============================================================================
+# NOTES FOR COLAB USERS
+# =============================================================================
+# 1. Colab comes with many packages pre-installed. This file only lists
+#    packages that need to be installed or upgraded.
+#
+# 2. Install with: !pip install -r requirements-colab.txt
+#
+# 3. For faster installation in Colab:
+#    !pip install -q -r requirements-colab.txt
+#
+# 4. If you encounter conflicts, try:
+#    !pip install --upgrade --force-reinstall -r requirements-colab.txt
+#
+# 5. Colab's pre-installed packages (no need to install):
+#    - matplotlib, seaborn (visualization)
+#    - requests, beautifulsoup4 (web)
+#    - Pillow (images)
+#    - Many others - check with !pip list
+#
+# 6. GPU Setup:
+#    - Go to Runtime > Change runtime type > Select GPU (T4 or V100)
+#    - Verify with: !nvidia-smi
+#
+# 7. Memory Management:
+#    - Colab has ~12GB RAM (free) or ~25GB (Pro)
+#    - Use smaller batch sizes if needed
+#    - Free: batch_size=8, Pro: batch_size=16
+#
+# 8. Session Timeout:
+#    - Free: 12 hours max
+#    - Pro: 24 hours max
+#    - Save checkpoints frequently!
+#
+# 9. Storage:
+#    - Mount Google Drive for persistent storage:
+#      from google.colab import drive
+#      drive.mount('/content/drive')
+#
+# 10. Recommended Colab Setup:
+#     # Mount Drive
+#     from google.colab import drive
+#     drive.mount('/content/drive')
+#     
+#     # Clone repo
+#     !git clone https://github.com/yourusername/whisper-amharic.git
+#     %cd whisper-amharic/faster-whisper
+#     
+#     # Install requirements
+#     !pip install -q -r requirements-colab.txt
+#     
+#     # Verify GPU
+#     !nvidia-smi
+#     
+#     # Start training
+#     !python train_whisper_lightning.py --config config/amharic_150h_config.yaml
