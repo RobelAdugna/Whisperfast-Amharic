@@ -433,6 +433,73 @@ def process_youtube_video(
     except Exception as e:
         return f"❌ Processing failed: {str(e)}", None, ""
 
+def process_local_file_pair(
+    audio_file,
+    srt_file,
+    output_dir: str,
+    use_demucs: bool,
+    min_duration: float,
+    max_duration: float,
+    progress=gr.Progress()
+):
+    """Process local audio + SRT file pair"""
+    try:
+        if not audio_file or not srt_file:
+            return "Please upload both audio and SRT files", None, ""
+        
+        progress(0, desc="Initializing...")
+        
+        preparator = YouTubeDatasetPreparator(
+            output_dir=output_dir,
+            use_demucs=use_demucs,
+            min_segment_duration=min_duration,
+            max_segment_duration=max_duration
+        )
+        
+        result = preparator.process_local_files(
+            audio_path=audio_file.name if hasattr(audio_file, 'name') else audio_file,
+            srt_path=srt_file.name if hasattr(srt_file, 'name') else srt_file,
+            progress_callback=progress
+        )
+        
+        if not result['success']:
+            return f"❌ Processing failed: {result['error']}", None, ""
+        
+        # Create summary
+        summary = f"""✅ Local Files Dataset Created Successfully!
+
+📁 **Files**: {result['audio_filename']} + {result['srt_filename']}
+🆔 **ID**: {result['file_id']}
+📊 **Total Segments**: {result['total_segments']}
+⏱️  **Total Duration**: {result['total_duration_minutes']:.1f} minutes ({result['total_duration_seconds']:.1f} seconds)
+
+📁 **Output Files**:
+  - Dataset Manifest: `{result['manifest_path']}`
+  - Audio: `{result['audio_path']}`
+  - Subtitles: `{result['srt_path']}`
+  - Segments: `{result['output_dir']}/segments/`
+
+🎯 **Next Steps**:
+  1. Review the generated segments
+  2. Use the manifest file for training
+  3. Combine with other datasets if needed
+"""
+        
+        # Prepare preview data
+        preview_data = []
+        for i, entry in enumerate(result['dataset_entries'][:10]):  # Show first 10
+            preview_data.append({
+                "Segment": i + 1,
+                "Duration": f"{entry['duration']:.2f}s",
+                "Text": entry['text'][:50] + "..." if len(entry['text']) > 50 else entry['text'],
+                "Audio File": entry['audio_path']
+            })
+        
+        return summary, preview_data, result['manifest_path']
+    
+    except Exception as e:
+        return f"❌ Processing failed: {str(e)}", None, ""
+
 def process_multiple_youtube_videos(
     urls_text: str,
     output_dir: str,
@@ -1082,6 +1149,105 @@ with gr.Blocks(
                             cookies_browser_dropdown
                         ],
                         outputs=[process_output, preview_dataframe, manifest_path_output]
+                    )
+                
+                # Local File Upload
+                with gr.Tab("📁 Local Files"):
+                    gr.Markdown("""
+                    ### Upload Local Audio + SRT Files
+                    
+                    Upload your own audio files with matching SRT subtitles.
+                    **Perfect for when YouTube download doesn't work!**
+                    
+                    **Supported audio formats**: MP3, WAV, M4A, OGG, FLAC
+                    """)
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            local_audio_file = gr.File(
+                                label="Audio File",
+                                file_types=["audio"],
+                                type="filepath"
+                            )
+                        
+                        with gr.Column():
+                            local_srt_file = gr.File(
+                                label="SRT Subtitle File",
+                                file_types=[".srt"],
+                                type="filepath"
+                            )
+                    
+                    gr.Markdown("### Processing Settings")
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            local_output_dir = gr.Textbox(
+                                label="Output Directory",
+                                value="./data/local_amharic",
+                                info="Where to save the processed dataset"
+                            )
+                            
+                            local_use_demucs = gr.Checkbox(
+                                label="Remove Background Music (Demucs)",
+                                value=False,
+                                info="Extract vocals only - usually not needed for clean audio"
+                            )
+                        
+                        with gr.Column():
+                            local_min_duration = gr.Slider(
+                                minimum=0.5,
+                                maximum=5.0,
+                                value=1.0,
+                                step=0.1,
+                                label="Minimum Segment Duration (seconds)"
+                            )
+                            
+                            local_max_duration = gr.Slider(
+                                minimum=10.0,
+                                maximum=30.0,
+                                value=25.0,
+                                step=1.0,
+                                label="Maximum Segment Duration (seconds)"
+                            )
+                    
+                    process_local_btn = gr.Button(
+                        "🚀 Process Files & Create Dataset",
+                        variant="primary",
+                        size="lg"
+                    )
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            local_process_output = gr.Textbox(
+                                label="Processing Results",
+                                lines=12
+                            )
+                        
+                        with gr.Column():
+                            local_preview_dataframe = gr.Dataframe(
+                                label="Dataset Preview (First 10 segments)",
+                                headers=["Segment", "Duration", "Text", "Audio File"],
+                                interactive=False
+                            )
+                    
+                    local_manifest_output = gr.Textbox(
+                        label="Manifest Path",
+                        interactive=False,
+                        visible=False
+                    )
+                    
+                    # Wire up local file processing
+                    process_local_btn.click(
+                        fn=process_local_file_pair,
+                        inputs=[
+                            local_audio_file,
+                            local_srt_file,
+                            local_output_dir,
+                            local_use_demucs,
+                            local_min_duration,
+                            local_max_duration
+                        ],
+                        outputs=[local_process_output, local_preview_dataframe, local_manifest_output]
                     )
                 
                 # Batch Processing

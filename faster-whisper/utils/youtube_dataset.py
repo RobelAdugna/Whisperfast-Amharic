@@ -517,6 +517,173 @@ class YouTubeDatasetPreparator:
                 except:
                     pass
     
+    def process_local_files(
+        self,
+        audio_path: str,
+        srt_path: str,
+        file_id: Optional[str] = None,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict:
+        """
+        Process local audio + SRT file pair to create dataset
+        
+        Args:
+            audio_path: Path to audio file (mp3, wav, etc.)
+            srt_path: Path to SRT subtitle file
+            file_id: Optional identifier for the file pair (default: audio filename)
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Dictionary with processing results and statistics
+        """
+        from pathlib import Path
+        
+        try:
+            audio_file = Path(audio_path)
+            srt_file = Path(srt_path)
+            
+            if not audio_file.exists():
+                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+            
+            if not srt_file.exists():
+                raise FileNotFoundError(f"SRT file not found: {srt_path}")
+            
+            # Use filename as ID if not provided
+            if not file_id:
+                file_id = audio_file.stem
+            
+            if progress_callback:
+                progress_callback(0.1, "Loading audio file...")
+            
+            # Convert audio to standard format if needed
+            if audio_file.suffix.lower() != '.wav':
+                if progress_callback:
+                    progress_callback(0.2, "Converting audio to WAV...")
+                
+                if librosa is None:
+                    raise ImportError("librosa is required for audio conversion")
+                
+                # Load and convert
+                audio, sr = librosa.load(audio_path, sr=self.target_sr, mono=True)
+                
+                # Save as WAV
+                temp_wav = self.temp_dir / f"{file_id}_converted.wav"
+                import soundfile as sf
+                sf.write(temp_wav, audio, sr)
+                audio_file = temp_wav
+            
+            if progress_callback:
+                progress_callback(0.3, "Parsing SRT file...")
+            
+            # Parse SRT
+            segments = self.parse_srt(srt_file)
+            
+            if not segments:
+                raise ValueError("No valid Amharic segments found in SRT file")
+            
+            if progress_callback:
+                progress_callback(0.4, f"Found {len(segments)} segments...")
+            
+            # Create dataset segments
+            dataset_entries = self.create_dataset_segments(
+                audio_file,
+                segments,
+                file_id,
+                progress_callback=progress_callback
+            )
+            
+            if progress_callback:
+                progress_callback(0.9, "Saving dataset manifest...")
+            
+            # Save manifest
+            manifest_path = self.output_dir / f"{file_id}_manifest.json"
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(dataset_entries, f, ensure_ascii=False, indent=2)
+            
+            # Copy files to output
+            final_audio_path = self.audio_dir / f"{file_id}{audio_file.suffix}"
+            shutil.copy2(audio_file, final_audio_path)
+            
+            final_srt_path = self.srt_dir / f"{file_id}.srt"
+            shutil.copy2(srt_file, final_srt_path)
+            
+            if progress_callback:
+                progress_callback(1.0, "Processing complete!")
+            
+            # Calculate statistics
+            total_duration = sum(entry['duration'] for entry in dataset_entries)
+            
+            return {
+                'success': True,
+                'file_id': file_id,
+                'audio_filename': audio_file.name,
+                'srt_filename': srt_file.name,
+                'total_segments': len(dataset_entries),
+                'total_duration_seconds': total_duration,
+                'total_duration_minutes': total_duration / 60,
+                'manifest_path': str(manifest_path),
+                'audio_path': str(final_audio_path),
+                'srt_path': str(final_srt_path),
+                'output_dir': str(self.output_dir),
+                'dataset_entries': dataset_entries
+            }
+        
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def process_multiple_local_files(
+        self,
+        file_pairs: List[Tuple[str, str]],
+        progress_callback: Optional[Callable] = None
+    ) -> Dict:
+        """
+        Process multiple local audio + SRT file pairs
+        
+        Args:
+            file_pairs: List of (audio_path, srt_path) tuples
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Dictionary with combined results
+        """
+        results = []
+        all_entries = []
+        
+        for idx, (audio_path, srt_path) in enumerate(file_pairs):
+            if progress_callback:
+                overall_progress = idx / len(file_pairs)
+                progress_callback(overall_progress, f"Processing file {idx + 1}/{len(file_pairs)}")
+            
+            result = self.process_local_files(audio_path, srt_path, progress_callback=None)
+            results.append(result)
+            
+            if result['success']:
+                all_entries.extend(result['dataset_entries'])
+        
+        # Save combined manifest
+        combined_manifest_path = self.output_dir / "combined_manifest.json"
+        with open(combined_manifest_path, 'w', encoding='utf-8') as f:
+            json.dump(all_entries, f, ensure_ascii=False, indent=2)
+        
+        successful = sum(1 for r in results if r['success'])
+        failed = len(results) - successful
+        total_duration = sum(
+            r.get('total_duration_seconds', 0) for r in results if r['success']
+        )
+        
+        return {
+            'total_files': len(file_pairs),
+            'successful': successful,
+            'failed': failed,
+            'total_segments': len(all_entries),
+            'total_duration_minutes': total_duration / 60,
+            'combined_manifest': str(combined_manifest_path),
+            'results': results
+        }
+    
     def process_multiple_videos(
         self,
         urls: List[str],
