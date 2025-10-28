@@ -17,7 +17,7 @@ ctranslate2>=3.20.0
 # Audio processing
 librosa>=0.10.0
 soundfile>=0.12.0
-audiomentations>=1.4.0
+audiomentations>=0.30.0
 
 # Lightning AI
 lightning>=2.1.0
