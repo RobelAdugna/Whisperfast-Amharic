@@ -434,20 +434,54 @@ def process_youtube_video(
         return f"❌ Processing failed: {str(e)}", None, ""
 
 def process_local_file_pair(
-    audio_file,
-    srt_file,
+    audio_files,
+    srt_files,
     output_dir: str,
     use_demucs: bool,
     min_duration: float,
     max_duration: float,
     progress=gr.Progress()
 ):
-    """Process local audio + SRT file pair"""
+    """Process local audio + SRT file pairs (supports multiple files)"""
     try:
-        if not audio_file or not srt_file:
+        if not audio_files or not srt_files:
             return "Please upload both audio and SRT files", None, ""
         
+        # Convert single file to list
+        if not isinstance(audio_files, list):
+            audio_files = [audio_files]
+        if not isinstance(srt_files, list):
+            srt_files = [srt_files]
+        
         progress(0, desc="Initializing...")
+        
+        # Auto-match files by name
+        from pathlib import Path
+        audio_dict = {}
+        for audio in audio_files:
+            audio_path = audio.name if hasattr(audio, 'name') else audio
+            audio_stem = Path(audio_path).stem
+            audio_dict[audio_stem] = audio_path
+        
+        srt_dict = {}
+        for srt in srt_files:
+            srt_path = srt.name if hasattr(srt, 'name') else srt
+            srt_stem = Path(srt_path).stem
+            # Remove language suffix if present (e.g., .en, .am)
+            srt_stem = srt_stem.split('.')[0]
+            srt_dict[srt_stem] = srt_path
+        
+        # Match pairs
+        file_pairs = []
+        matched_stems = set(audio_dict.keys()) & set(srt_dict.keys())
+        
+        if not matched_stems:
+            return f"❌ No matching files found!\n\nAudio files: {list(audio_dict.keys())}\nSRT files: {list(srt_dict.keys())}\n\nMake sure filenames match (e.g., video1.mp3 + video1.srt)", None, ""
+        
+        for stem in matched_stems:
+            file_pairs.append((audio_dict[stem], srt_dict[stem]))
+        
+        progress(0.1, f"Found {len(file_pairs)} matching file pairs")
         
         preparator = YouTubeDatasetPreparator(
             output_dir=output_dir,
@@ -456,17 +490,20 @@ def process_local_file_pair(
             max_segment_duration=max_duration
         )
         
-        result = preparator.process_local_files(
-            audio_path=audio_file.name if hasattr(audio_file, 'name') else audio_file,
-            srt_path=srt_file.name if hasattr(srt_file, 'name') else srt_file,
-            progress_callback=progress
-        )
-        
-        if not result['success']:
-            return f"❌ Processing failed: {result['error']}", None, ""
-        
-        # Create summary
-        summary = f"""✅ Local Files Dataset Created Successfully!
+        # Process single or multiple pairs
+        if len(file_pairs) == 1:
+            audio_path, srt_path = file_pairs[0]
+            result = preparator.process_local_files(
+                audio_path=audio_path,
+                srt_path=srt_path,
+                progress_callback=progress
+            )
+            
+            if not result['success']:
+                return f"❌ Processing failed: {result['error']}", None, ""
+            
+            # Create summary
+            summary = f"""✅ Local Files Dataset Created Successfully!
 
 📁 **Files**: {result['audio_filename']} + {result['srt_filename']}
 🆔 **ID**: {result['file_id']}
@@ -484,21 +521,52 @@ def process_local_file_pair(
   2. Use the manifest file for training
   3. Combine with other datasets if needed
 """
+            
+            # Prepare preview data
+            preview_data = []
+            for i, entry in enumerate(result['dataset_entries'][:10]):  # Show first 10
+                preview_data.append({
+                    "Segment": i + 1,
+                    "Duration": f"{entry['duration']:.2f}s",
+                    "Text": entry['text'][:50] + "..." if len(entry['text']) > 50 else entry['text'],
+                    "Audio File": entry['audio_path']
+                })
+            
+            return summary, preview_data, result['manifest_path']
         
-        # Prepare preview data
-        preview_data = []
-        for i, entry in enumerate(result['dataset_entries'][:10]):  # Show first 10
-            preview_data.append({
-                "Segment": i + 1,
-                "Duration": f"{entry['duration']:.2f}s",
-                "Text": entry['text'][:50] + "..." if len(entry['text']) > 50 else entry['text'],
-                "Audio File": entry['audio_path']
-            })
-        
-        return summary, preview_data, result['manifest_path']
+        else:
+            # Multiple pairs
+            result = preparator.process_multiple_local_files(
+                file_pairs=file_pairs,
+                progress_callback=progress
+            )
+            
+            # Create summary
+            summary = f"""✅ Batch Processing Complete!
+
+📊 **Statistics**:
+  - Total Files: {result['total_files']}
+  - Successful: {result['successful']}
+  - Failed: {result['failed']}
+  - Total Segments: {result['total_segments']}
+  - Total Duration: {result['total_duration_minutes']:.1f} minutes
+
+📁 **Combined Manifest**: `{result['combined_manifest']}`
+
+📹 **Individual Results**:
+"""
+            
+            for i, res in enumerate(result['results'], 1):
+                if res['success']:
+                    summary += f"\n  {i}. ✅ {res['audio_filename']} ({res['total_segments']} segments)"
+                else:
+                    summary += f"\n  {i}. ❌ Failed: {res['error']}"
+            
+            return summary, None, result['combined_manifest']
     
     except Exception as e:
-        return f"❌ Processing failed: {str(e)}", None, ""
+        import traceback
+        return f"❌ Processing failed: {str(e)}\n\n{traceback.format_exc()}", None, ""
 
 def process_multiple_youtube_videos(
     urls_text: str,
@@ -1159,22 +1227,35 @@ with gr.Blocks(
                     Upload your own audio files with matching SRT subtitles.
                     **Perfect for when YouTube download doesn't work!**
                     
-                    **Supported audio formats**: MP3, WAV, M4A, OGG, FLAC
+                    **Features**:
+                    - ✅ Single or multiple file pairs
+                    - ✅ Automatic filename matching
+                    - ✅ Any audio format (MP3, WAV, M4A, OGG, FLAC)
+                    - ✅ Batch processing support
+                    
+                    **Filename Matching**:
+                    - `video1.mp3` + `video1.srt` ✅
+                    - `lecture.wav` + `lecture.am.srt` ✅ (language suffix ignored)
+                    - `audio_a.mp3` + `audio_b.srt` ❌ (names don't match)
                     """)
                     
                     with gr.Row():
                         with gr.Column():
                             local_audio_file = gr.File(
-                                label="Audio File",
+                                label="Audio File(s)",
                                 file_types=["audio"],
-                                type="filepath"
+                                file_count="multiple",
+                                type="filepath",
+                                info="Upload one or more audio files (MP3, WAV, etc.)"
                             )
                         
                         with gr.Column():
                             local_srt_file = gr.File(
-                                label="SRT Subtitle File",
+                                label="SRT Subtitle File(s)",
                                 file_types=[".srt"],
-                                type="filepath"
+                                file_count="multiple",
+                                type="filepath",
+                                info="Upload matching SRT files (same names as audio)"
                             )
                     
                     gr.Markdown("### Processing Settings")
