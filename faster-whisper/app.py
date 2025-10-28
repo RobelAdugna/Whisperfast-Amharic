@@ -298,6 +298,30 @@ def transcribe(
     except Exception as e:
         return f"❌ Transcription failed: {str(e)}", None, None, None, ""
 
+def set_checkpoint_dir(new_dir: str):
+    """Set a new checkpoint directory"""
+    global CHECKPOINT_DIR
+    try:
+        if not new_dir or not new_dir.strip():
+            return f"❌ Invalid directory path", gr.update()
+        
+        # Expand paths like ~/... or environment variables
+        new_dir = os.path.expanduser(new_dir)
+        new_dir = os.path.abspath(new_dir)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(new_dir, exist_ok=True)
+        
+        # Update global variable
+        CHECKPOINT_DIR = new_dir
+        
+        return (
+            f"✅ Checkpoint directory set to: {CHECKPOINT_DIR}",
+            gr.update(choices=format_checkpoint_dropdown())
+        )
+    except Exception as e:
+        return f"❌ Failed to set checkpoint directory: {str(e)}", gr.update()
+
 def delete_checkpoint(checkpoint_path: str):
     """Delete a checkpoint file"""
     try:
@@ -463,6 +487,16 @@ with gr.Blocks(
             gr.Markdown("### Checkpoint Management")
             
             with gr.Row():
+                checkpoint_dir_input = gr.Textbox(
+                    label="Checkpoint Directory",
+                    value=CHECKPOINT_DIR,
+                    info="For Google Colab: Use /content/drive/MyDrive/whisper_checkpoints (after mounting Drive)"
+                )
+                set_ckpt_dir_btn = gr.Button("📁 Set Checkpoint Dir", scale=0)
+            
+            ckpt_dir_status = gr.Textbox(label="Status", value=f"Current: {CHECKPOINT_DIR}", interactive=False)
+            
+            with gr.Row():
                 checkpoint_dropdown = gr.Dropdown(
                     choices=format_checkpoint_dropdown(),
                     label="Resume from Checkpoint (optional)",
@@ -498,6 +532,12 @@ with gr.Blocks(
                     use_deepspeed, use_lora, lora_r, lora_alpha
                 ],
                 outputs=[training_output, checkpoint_dropdown, training_log]
+            )
+            
+            set_ckpt_dir_btn.click(
+                fn=set_checkpoint_dir,
+                inputs=checkpoint_dir_input,
+                outputs=[ckpt_dir_status, checkpoint_dropdown]
             )
             
             refresh_ckpt_btn.click(
