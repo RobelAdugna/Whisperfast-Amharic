@@ -1016,9 +1016,9 @@ with gr.Blocks(
                             
                             cookies_browser_dropdown = gr.Dropdown(
                                 choices=["none", "chrome", "firefox", "edge", "safari", "brave"],
-                                value="chrome",
-                                label="Extract Cookies From Browser (Fix Bot Detection)",
-                                info="Select your browser to bypass YouTube bot detection"
+                                value="none",
+                                label="Extract Cookies From Browser (Optional)",
+                                info="Leave as 'none' - cookies only needed if default bypass fails"
                             )
                         
                         with gr.Column():
@@ -1115,9 +1115,9 @@ with gr.Blocks(
                             
                             batch_cookies_browser = gr.Dropdown(
                                 choices=["none", "chrome", "firefox", "edge", "safari", "brave"],
-                                value="chrome",
-                                label="Extract Cookies From Browser (Fix Bot Detection)",
-                                info="Select your browser to bypass YouTube bot detection"
+                                value="none",
+                                label="Extract Cookies From Browser (Optional)",
+                                info="Leave as 'none' - cookies only needed if default bypass fails"
                             )
                         
                         with gr.Column():

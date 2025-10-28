@@ -96,6 +96,16 @@ class YouTubeDatasetPreparator:
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
+            # Bot bypass strategies
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],
+                    'player_skip': ['webpage', 'configs'],
+                }
+            },
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
         }
         
         try:
@@ -177,9 +187,23 @@ class YouTubeDatasetPreparator:
             'subtitleslangs': ['am'],
             'subtitlesformat': 'srt',
             'quiet': False,
+            # Bot bypass strategies
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],  # Use mobile and web clients
+                    'player_skip': ['webpage', 'configs'],  # Skip unnecessary requests
+                }
+            },
+            # Additional headers to mimic browser
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
         }
         
-        # Add cookie support to bypass bot detection
+        # Add cookie support to bypass bot detection (optional)
         if self.cookies_from_browser:
             ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
         
