@@ -35,6 +35,7 @@ tqdm>=4.66.0
 pyyaml>=6.0
 wandb>=0.16.0  # Optional: for experiment tracking
 gradio>=4.0.0  # For web interface
+plotly>=5.0.0  # Optional: for enhanced visualizations
 
 # Amharic text processing
 # python-ethiopic>=0.7.0  # Package not available on PyPI - handle Ge'ez script with custom utilities if needed
