@@ -49,8 +49,8 @@ class AudioAugmentor:
                     p=0.3
                 ),
                 Shift(
-                    min_fraction=-0.5,
-                    max_fraction=0.5,
+                    min_shift=-0.5,
+                    max_shift=0.5,
                     p=0.3
                 ),
             ])
