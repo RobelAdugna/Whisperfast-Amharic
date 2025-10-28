@@ -372,6 +372,7 @@ def process_youtube_video(
     use_demucs: bool,
     min_duration: float,
     max_duration: float,
+    cookies_browser: str,
     progress=gr.Progress()
 ):
     """Process a YouTube video to create dataset"""
@@ -385,7 +386,8 @@ def process_youtube_video(
             output_dir=output_dir,
             use_demucs=use_demucs,
             min_segment_duration=min_duration,
-            max_segment_duration=max_duration
+            max_segment_duration=max_duration,
+            cookies_from_browser=cookies_browser if cookies_browser != "none" else None
         )
         
         result = preparator.process_youtube_video(
@@ -437,6 +439,7 @@ def process_multiple_youtube_videos(
     use_demucs: bool,
     min_duration: float,
     max_duration: float,
+    cookies_browser: str,
     progress=gr.Progress()
 ):
     """Process multiple YouTube videos from text input (one URL per line)"""
@@ -456,7 +459,8 @@ def process_multiple_youtube_videos(
             output_dir=output_dir,
             use_demucs=use_demucs,
             min_segment_duration=min_duration,
-            max_segment_duration=max_duration
+            max_segment_duration=max_duration,
+            cookies_from_browser=cookies_browser if cookies_browser != "none" else None
         )
         
         result = preparator.process_multiple_videos(
@@ -1009,6 +1013,13 @@ with gr.Blocks(
                                 value=True,
                                 info="Extract vocals only - requires Demucs installed"
                             )
+                            
+                            cookies_browser_dropdown = gr.Dropdown(
+                                choices=["none", "chrome", "firefox", "edge", "safari", "brave"],
+                                value="chrome",
+                                label="Extract Cookies From Browser (Fix Bot Detection)",
+                                info="Select your browser to bypass YouTube bot detection"
+                            )
                         
                         with gr.Column():
                             min_seg_duration = gr.Slider(
@@ -1067,7 +1078,8 @@ with gr.Blocks(
                             youtube_output_dir,
                             use_demucs_checkbox,
                             min_seg_duration,
-                            max_seg_duration
+                            max_seg_duration,
+                            cookies_browser_dropdown
                         ],
                         outputs=[process_output, preview_dataframe, manifest_path_output]
                     )
@@ -1099,6 +1111,13 @@ with gr.Blocks(
                             batch_use_demucs = gr.Checkbox(
                                 label="Remove Background Music (Demucs)",
                                 value=True
+                            )
+                            
+                            batch_cookies_browser = gr.Dropdown(
+                                choices=["none", "chrome", "firefox", "edge", "safari", "brave"],
+                                value="chrome",
+                                label="Extract Cookies From Browser (Fix Bot Detection)",
+                                info="Select your browser to bypass YouTube bot detection"
                             )
                         
                         with gr.Column():
@@ -1143,7 +1162,8 @@ with gr.Blocks(
                             batch_output_dir,
                             batch_use_demucs,
                             batch_min_duration,
-                            batch_max_duration
+                            batch_max_duration,
+                            batch_cookies_browser
                         ],
                         outputs=[batch_output, preview_dataframe, batch_manifest_output]
                     )

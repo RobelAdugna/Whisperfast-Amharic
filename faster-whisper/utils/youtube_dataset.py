@@ -42,7 +42,8 @@ class YouTubeDatasetPreparator:
         use_demucs: bool = True,
         min_segment_duration: float = 1.0,
         max_segment_duration: float = 25.0,
-        target_sample_rate: int = 16000
+        target_sample_rate: int = 16000,
+        cookies_from_browser: Optional[str] = None
     ):
         """
         Initialize YouTube Dataset Preparator
@@ -54,6 +55,7 @@ class YouTubeDatasetPreparator:
             min_segment_duration: Minimum segment duration in seconds
             max_segment_duration: Maximum segment duration in seconds
             target_sample_rate: Target sample rate for audio (Whisper uses 16kHz)
+            cookies_from_browser: Browser to extract cookies from (chrome, firefox, edge, etc.)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -65,6 +67,7 @@ class YouTubeDatasetPreparator:
         self.min_duration = min_segment_duration
         self.max_duration = max_segment_duration
         self.target_sr = target_sample_rate
+        self.cookies_from_browser = cookies_from_browser
         
         # Create subdirectories
         self.audio_dir = self.output_dir / "audio"
@@ -175,6 +178,10 @@ class YouTubeDatasetPreparator:
             'subtitlesformat': 'srt',
             'quiet': False,
         }
+        
+        # Add cookie support to bypass bot detection
+        if self.cookies_from_browser:
+            ydl_opts['cookiesfrombrowser'] = (self.cookies_from_browser,)
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
