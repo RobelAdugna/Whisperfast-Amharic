@@ -573,6 +573,114 @@ def process_local_file_pair(
         import traceback
         return f"❌ Processing failed: {str(e)}\n\n{traceback.format_exc()}", None, ""
 
+def analyze_current_dataset(output_dir: str):
+    """Analyze and display statistics about the current accumulated dataset"""
+    try:
+        import json
+        from pathlib import Path
+        import numpy as np
+        
+        output_path = Path(output_dir)
+        master_manifest = output_path / "master_manifest.json"
+        
+        if not master_manifest.exists():
+            return "❌ No dataset found. Upload some files first to see statistics."
+        
+        # Load master manifest
+        with open(master_manifest, 'r', encoding='utf-8') as f:
+            dataset = json.load(f)
+        
+        if not dataset:
+            return "❌ Dataset is empty."
+        
+        # Calculate statistics
+        total_segments = len(dataset)
+        durations = [entry['duration'] for entry in dataset]
+        texts = [entry['text'] for entry in dataset]
+        
+        # Duration statistics
+        total_duration_sec = sum(durations)
+        total_hours = total_duration_sec / 3600
+        total_minutes = total_duration_sec / 60
+        avg_duration = np.mean(durations)
+        median_duration = np.median(durations)
+        min_duration = min(durations)
+        max_duration = max(durations)
+        std_duration = np.std(durations)
+        
+        # Text statistics
+        text_lengths = [len(text) for text in texts]
+        avg_text_length = np.mean(text_lengths)
+        total_characters = sum(text_lengths)
+        
+        # Quality statistics (if available)
+        quality_scores = [entry.get('quality_score', 0) for entry in dataset if 'quality_score' in entry]
+        avg_quality = np.mean(quality_scores) if quality_scores else 0
+        
+        # Audio IDs to determine range
+        audio_ids = [entry.get('audio_id', 0) for entry in dataset if 'audio_id' in entry]
+        first_audio_id = min(audio_ids) if audio_ids else 1
+        last_audio_id = max(audio_ids) if audio_ids else 0
+        
+        # Duration distribution
+        duration_bins = {
+            '< 2s': sum(1 for d in durations if d < 2),
+            '2-5s': sum(1 for d in durations if 2 <= d < 5),
+            '5-10s': sum(1 for d in durations if 5 <= d < 10),
+            '10-15s': sum(1 for d in durations if 10 <= d < 15),
+            '15-20s': sum(1 for d in durations if 15 <= d < 20),
+            '> 20s': sum(1 for d in durations if d >= 20)
+        }
+        
+        # Format output
+        report = f"""📊 **DATASET STATISTICS**
+
+═══════════════════════════════════════
+
+📈 **OVERVIEW**
+  • Total Segments: {total_segments:,}
+  • Audio Files: audio_{first_audio_id:05d}.wav to audio_{last_audio_id:05d}.wav
+  • Total Duration: {total_hours:.2f} hours ({total_minutes:.1f} minutes)
+  • Total Characters: {total_characters:,}
+
+⏱️  **DURATION STATISTICS**
+  • Average: {avg_duration:.2f} seconds
+  • Median: {median_duration:.2f} seconds
+  • Std Dev: {std_duration:.2f} seconds
+  • Min: {min_duration:.2f} seconds
+  • Max: {max_duration:.2f} seconds
+
+📊 **DURATION DISTRIBUTION**
+  • < 2s: {duration_bins['< 2s']} segments ({duration_bins['< 2s']/total_segments*100:.1f}%)
+  • 2-5s: {duration_bins['2-5s']} segments ({duration_bins['2-5s']/total_segments*100:.1f}%)
+  • 5-10s: {duration_bins['5-10s']} segments ({duration_bins['5-10s']/total_segments*100:.1f}%)
+  • 10-15s: {duration_bins['10-15s']} segments ({duration_bins['10-15s']/total_segments*100:.1f}%)
+  • 15-20s: {duration_bins['15-20s']} segments ({duration_bins['15-20s']/total_segments*100:.1f}%)
+  • > 20s: {duration_bins['> 20s']} segments ({duration_bins['> 20s']/total_segments*100:.1f}%)
+
+📝 **TEXT STATISTICS**
+  • Average Text Length: {avg_text_length:.1f} characters
+  • Avg Characters/Second: {total_characters/total_duration_sec:.1f}
+
+✨ **QUALITY STATISTICS**
+  • Average Quality Score: {avg_quality:.3f}
+  • High Quality (≥0.85): {sum(1 for q in quality_scores if q >= 0.85)} segments
+  • Good Quality (≥0.75): {sum(1 for q in quality_scores if q >= 0.75)} segments
+
+📁 **FILES**
+  • Master Manifest: {master_manifest}
+  • Segments Directory: {output_path / 'segments'}
+
+═══════════════════════════════════════
+
+💡 This dataset is ready for Whisper fine-tuning!
+"""
+        
+        return report
+    
+    except Exception as e:
+        return f"❌ Error analyzing dataset: {str(e)}"
+
 def process_multiple_youtube_videos(
     urls_text: str,
     output_dir: str,
@@ -1425,6 +1533,39 @@ with gr.Blocks(
                         ],
                         outputs=[batch_output, preview_dataframe, batch_manifest_output]
                     )
+            
+            gr.Markdown("""
+            ---
+            ### 📊 Dataset Statistics
+            
+            Analyze your accumulated dataset to see total hours, segments, quality metrics, and more.
+            """)
+            
+            with gr.Row():
+                with gr.Column(scale=1):
+                    stats_output_dir = gr.Textbox(
+                        label="Dataset Directory",
+                        value="./data/youtube_amharic",
+                        info="Path to the dataset containing master_manifest.json"
+                    )
+                    show_stats_btn = gr.Button(
+                        "📊 Show Dataset Statistics",
+                        variant="secondary",
+                        size="lg"
+                    )
+                
+                with gr.Column(scale=2):
+                    stats_display = gr.Markdown(
+                        label="Dataset Statistics",
+                        value="Click the button to see statistics..."
+                    )
+            
+            # Wire up dataset statistics
+            show_stats_btn.click(
+                fn=analyze_current_dataset,
+                inputs=stats_output_dir,
+                outputs=stats_display
+            )
             
             gr.Markdown("""
             ---

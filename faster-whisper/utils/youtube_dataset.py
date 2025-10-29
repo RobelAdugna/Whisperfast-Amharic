@@ -28,8 +28,10 @@ try:
     import soundfile as sf
     import librosa
     import numpy as np
+    from scipy import signal
 except ImportError:
     librosa = None
+    signal = None
 
 try:
     from .amharic_processing import AmharicTextProcessor
@@ -77,14 +79,12 @@ class YouTubeDatasetPreparator:
         self.append_mode = append_mode
         
         # Create subdirectories
-        self.audio_dir = self.output_dir / "audio"
-        self.audio_dir.mkdir(exist_ok=True)
-        
-        self.srt_dir = self.output_dir / "subtitles"
-        self.srt_dir.mkdir(exist_ok=True)
-        
         self.segments_dir = self.output_dir / "segments"
         self.segments_dir.mkdir(exist_ok=True)
+        
+        # Temporary processing directory (will be cleaned up)
+        self.temp_processing_dir = self.temp_dir / "processing"
+        self.temp_processing_dir.mkdir(exist_ok=True, parents=True)
         
         # Master manifest for incremental building
         self.master_manifest_path = self.output_dir / "master_manifest.json"
@@ -528,8 +528,107 @@ class YouTubeDatasetPreparator:
             Normalized text
         """
         if self.amharic_processor:
-            return self.amharic_processor.normalize_text(text)
-        return text.strip()
+            normalized = self.amharic_processor.normalize_text(text)
+        else:
+            normalized = text.strip()
+        
+        # Additional cleanup
+        # Remove multiple spaces
+        normalized = re.sub(r'\s+', ' ', normalized)
+        # Remove leading/trailing whitespace
+        normalized = normalized.strip()
+        
+        return normalized
+    
+    def _preprocess_audio_segment(self, audio_segment: np.ndarray, sr: int) -> np.ndarray:
+        """
+        SOTA-grade audio preprocessing for Whisper training
+        
+        Args:
+            audio_segment: Audio samples
+            sr: Sample rate
+            
+        Returns:
+            Preprocessed audio segment
+        """
+        if len(audio_segment) == 0:
+            return audio_segment
+        
+        # 1. Trim silence from beginning and end (aggressive trimming)
+        # Use lower threshold for more aggressive silence removal
+        audio_segment = librosa.effects.trim(
+            audio_segment,
+            top_db=30,  # More aggressive than default 60dB
+            frame_length=512,
+            hop_length=128
+        )[0]
+        
+        # 2. Normalize audio to target LUFS (-20dB for speech)
+        # Simple peak normalization (more sophisticated LUFS would require pyloudnorm)
+        peak = np.abs(audio_segment).max()
+        if peak > 0:
+            # Target peak at -3dB (0.707) to avoid clipping
+            target_peak = 0.707
+            audio_segment = audio_segment * (target_peak / peak)
+        
+        # 3. Apply gentle high-pass filter to remove rumble/DC offset
+        # Remove frequencies below 80Hz (speech fundamental is ~100-250Hz)
+        from scipy import signal
+        sos = signal.butter(4, 80, 'hp', fs=sr, output='sos')
+        audio_segment = signal.sosfilt(sos, audio_segment)
+        
+        return audio_segment
+    
+    def _cleanup_raw_files(self, video_id: str, clean_audio_path: Path = None):
+        """
+        Clean up temporary/raw files after successful dataset creation
+        
+        Args:
+            video_id: Video identifier
+            clean_audio_path: Path to cleaned audio (from Demucs, if used)
+        """
+        try:
+            # Remove original downloaded audio from temp
+            original_audio = self.temp_dir / f"{video_id}.wav"
+            if original_audio.exists():
+                original_audio.unlink()
+                print(f"✓ Cleaned up: {original_audio.name}")
+            
+            # Remove Demucs output directory if exists
+            demucs_output = self.temp_dir / "demucs_output"
+            if demucs_output.exists():
+                shutil.rmtree(demucs_output)
+                print("✓ Cleaned up: Demucs temporary files")
+            
+            # Remove converted audio if it exists
+            if clean_audio_path and clean_audio_path.exists():
+                # Only remove if it's in temp directory
+                if str(clean_audio_path).startswith(str(self.temp_dir)):
+                    clean_audio_path.unlink()
+                    print(f"✓ Cleaned up: {clean_audio_path.name}")
+            
+            # Remove subtitle files from temp
+            for srt_pattern in [f"{video_id}.am.srt", f"{video_id}.srt"]:
+                srt_file = self.temp_dir / srt_pattern
+                if srt_file.exists():
+                    srt_file.unlink()
+                    print(f"✓ Cleaned up: {srt_file.name}")
+            
+            # Remove any other temp files for this video
+            for temp_file in self.temp_dir.glob(f"{video_id}*"):
+                try:
+                    if temp_file.is_file():
+                        temp_file.unlink()
+                    elif temp_file.is_dir():
+                        shutil.rmtree(temp_file)
+                except:
+                    pass
+            
+            print(f"✅ Cleanup complete: All raw/temporary files removed")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Cleanup encountered an issue: {e}")
+            # Don't raise - cleanup failure shouldn't stop the pipeline
     
     def create_dataset_segments(
         self,
@@ -537,7 +636,7 @@ class YouTubeDatasetPreparator:
         segments: List[Dict],
         video_id: str,
         progress_callback: Optional[Callable] = None,
-        quality_threshold: float = 0.6,
+        quality_threshold: float = 0.70,  # Increased from 0.6 for SOTA quality
         start_counter: Optional[int] = None
     ) -> Tuple[List[Dict], Dict, int]:
         """
@@ -596,6 +695,18 @@ class YouTubeDatasetPreparator:
             audio_segment = audio[start_sample:end_sample]
             
             # Skip if segment is too short after extraction
+            if len(audio_segment) < sr * self.min_duration:
+                quality_stats['failed_duration'] += 1
+                continue
+            
+            # SOTA-grade audio preprocessing
+            try:
+                audio_segment = self._preprocess_audio_segment(audio_segment, sr)
+            except Exception as e:
+                print(f"⚠️ Warning: Audio preprocessing failed for segment {idx}: {e}")
+                # Continue with unprocessed audio
+            
+            # Skip if segment became too short after preprocessing (silence trimming)
             if len(audio_segment) < sr * self.min_duration:
                 quality_stats['failed_duration'] += 1
                 continue
@@ -723,12 +834,11 @@ class YouTubeDatasetPreparator:
             # Step 6: Save to master manifest (incremental)
             master_info = self._save_master_manifest(dataset_entries)
             
-            # Copy cleaned audio and subtitles to output
-            final_audio_path = self.audio_dir / f"{info['video_id']}.wav"
-            shutil.copy2(clean_audio_path, final_audio_path)
+            # Step 7: Clean up all raw/temporary files (keep only segments + manifest)
+            if progress_callback:
+                progress_callback(0.95, "Cleaning up temporary files...")
             
-            final_srt_path = self.srt_dir / f"{info['video_id']}.srt"
-            shutil.copy2(srt_path, final_srt_path)
+            self._cleanup_raw_files(info['video_id'], clean_audio_path)
             
             if progress_callback:
                 progress_callback(1.0, "Processing complete!")
@@ -744,29 +854,27 @@ class YouTubeDatasetPreparator:
                 'total_duration_seconds': total_duration,
                 'total_duration_minutes': total_duration / 60,
                 'manifest_path': str(manifest_path),
-                'audio_path': str(final_audio_path),
-                'srt_path': str(final_srt_path),
                 'output_dir': str(self.output_dir),
                 'dataset_entries': dataset_entries,
                 'quality_stats': quality_stats,
-                'master_manifest': master_info
+                'master_manifest': master_info,
+                'cleanup_performed': True
             }
             
             return result
         
         except Exception as e:
+            # Attempt cleanup even on failure
+            try:
+                if 'info' in locals():
+                    self._cleanup_raw_files(info['video_id'], clean_audio_path if 'clean_audio_path' in locals() else None)
+            except:
+                pass
+            
             return {
                 'success': False,
                 'error': str(e)
             }
-        
-        finally:
-            # Cleanup temp files
-            if audio_path.exists():
-                try:
-                    audio_path.unlink()
-                except:
-                    pass
     
     def process_local_files(
         self,
@@ -854,12 +962,11 @@ class YouTubeDatasetPreparator:
             # Save to master manifest (incremental)
             master_info = self._save_master_manifest(dataset_entries)
             
-            # Copy files to output
-            final_audio_path = self.audio_dir / f"{file_id}{audio_file.suffix}"
-            shutil.copy2(audio_file, final_audio_path)
+            # Cleanup temporary converted files
+            if progress_callback:
+                progress_callback(0.95, "Cleaning up temporary files...")
             
-            final_srt_path = self.srt_dir / f"{file_id}.srt"
-            shutil.copy2(srt_file, final_srt_path)
+            self._cleanup_raw_files(file_id, audio_file if audio_file.suffix == '.wav' else None)
             
             if progress_callback:
                 progress_callback(1.0, "Processing complete!")
@@ -876,12 +983,11 @@ class YouTubeDatasetPreparator:
                 'total_duration_seconds': total_duration,
                 'total_duration_minutes': total_duration / 60,
                 'manifest_path': str(manifest_path),
-                'audio_path': str(final_audio_path),
-                'srt_path': str(final_srt_path),
                 'output_dir': str(self.output_dir),
                 'dataset_entries': dataset_entries,
                 'quality_stats': quality_stats,
-                'master_manifest': master_info
+                'master_manifest': master_info,
+                'cleanup_performed': True
             }
         
         except Exception as e:
