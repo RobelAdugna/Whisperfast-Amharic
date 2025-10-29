@@ -89,8 +89,26 @@ class YouTubeDatasetPreparator:
         # Master manifest for incremental building
         self.master_manifest_path = self.output_dir / "master_manifest.json"
         
+        # Counter file for sequential naming
+        self.counter_file = self.output_dir / ".audio_counter.txt"
+        
         # Initialize Amharic processor if available
         self.amharic_processor = AmharicTextProcessor() if AmharicTextProcessor else None
+    
+    def _get_next_audio_counter(self) -> int:
+        """Get the next audio counter for sequential naming"""
+        if self.append_mode and self.counter_file.exists():
+            try:
+                with open(self.counter_file, 'r') as f:
+                    return int(f.read().strip())
+            except:
+                return 1
+        return 1
+    
+    def _save_audio_counter(self, counter: int):
+        """Save the current audio counter"""
+        with open(self.counter_file, 'w') as f:
+            f.write(str(counter))
     
     def _load_existing_manifest(self) -> List[Dict]:
         """Load existing master manifest if in append mode"""
@@ -519,26 +537,34 @@ class YouTubeDatasetPreparator:
         segments: List[Dict],
         video_id: str,
         progress_callback: Optional[Callable] = None,
-        quality_threshold: float = 0.6
-    ) -> Tuple[List[Dict], Dict]:
+        quality_threshold: float = 0.6,
+        start_counter: Optional[int] = None
+    ) -> Tuple[List[Dict], Dict, int]:
         """
         Create individual audio segments from subtitles with Amharic quality scoring
         
         Args:
             audio_path: Path to processed audio file
             segments: List of subtitle segments
-            video_id: YouTube video ID
+            video_id: YouTube video ID (not used for naming anymore)
             progress_callback: Optional callback for progress updates
             quality_threshold: Minimum quality score (0-1) to include segment
+            start_counter: Starting counter for sequential naming (auto-determined if None)
             
         Returns:
-            Tuple of (dataset entries, quality statistics)
+            Tuple of (dataset entries, quality statistics, next_counter)
         """
         if librosa is None:
             raise ImportError("librosa is not installed. Install with: pip install librosa")
         
         if progress_callback:
             progress_callback(0.7, "Creating dataset segments with quality scoring...")
+        
+        # Get starting counter for sequential naming
+        if start_counter is None:
+            audio_counter = self._get_next_audio_counter()
+        else:
+            audio_counter = start_counter
         
         # Load full audio
         audio, sr = librosa.load(audio_path, sr=self.target_sr, mono=True)
@@ -603,8 +629,8 @@ class YouTubeDatasetPreparator:
                 quality_stats['failed_quality'] += 1
                 continue
             
-            # Save segment
-            segment_filename = f"{video_id}_seg_{idx:04d}.wav"
+            # Sequential naming: audio_00001.wav, audio_00002.wav, etc.
+            segment_filename = f"audio_{audio_counter:05d}.wav"
             segment_path = self.segments_dir / segment_filename
             
             sf.write(segment_path, audio_segment, sr)
@@ -616,8 +642,9 @@ class YouTubeDatasetPreparator:
                 'duration': segment['duration'],
                 'start': segment['start'],
                 'end': segment['end'],
-                'video_id': video_id,
+                'source_id': video_id,  # Track source but don't use for naming
                 'segment_id': idx,
+                'audio_id': audio_counter,  # Sequential ID
                 'quality_score': round(overall_score, 3),
                 'quality_metrics': {
                     'amharic_purity': round(quality_scores['amharic_purity'], 3),
@@ -627,6 +654,7 @@ class YouTubeDatasetPreparator:
             })
             
             quality_stats['passed_quality'] += 1
+            audio_counter += 1  # Increment for next segment
             
             if progress_callback and idx % 10 == 0:
                 progress = 0.7 + (idx / len(segments)) * 0.2
@@ -636,7 +664,10 @@ class YouTubeDatasetPreparator:
         if quality_stats['total_segments'] > 0:
             quality_stats['avg_quality_score'] = round(total_quality / quality_stats['total_segments'], 3)
         
-        return dataset_entries, quality_stats
+        # Save the updated counter
+        self._save_audio_counter(audio_counter)
+        
+        return dataset_entries, quality_stats, audio_counter
     
     def process_youtube_video(
         self,
@@ -673,8 +704,8 @@ class YouTubeDatasetPreparator:
             if not segments:
                 raise ValueError("No valid Amharic segments found in subtitles")
             
-            # Step 4: Create dataset segments with quality scoring
-            dataset_entries, quality_stats = self.create_dataset_segments(
+            # Step 4: Create dataset segments with quality scoring and sequential naming
+            dataset_entries, quality_stats, _ = self.create_dataset_segments(
                 clean_audio_path,
                 segments,
                 info['video_id'],
@@ -804,8 +835,8 @@ class YouTubeDatasetPreparator:
             if progress_callback:
                 progress_callback(0.4, f"Found {len(segments)} segments...")
             
-            # Create dataset segments with quality scoring
-            dataset_entries, quality_stats = self.create_dataset_segments(
+            # Create dataset segments with quality scoring and sequential naming
+            dataset_entries, quality_stats, _ = self.create_dataset_segments(
                 audio_file,
                 segments,
                 file_id,
